@@ -58,9 +58,12 @@ class KeurigPlatform {
             return;
           }
           if (this.operations.has(id) || Date.now() < (accessory.context.nextBrew || 0)) {
-            throw new Error('A brew was recently requested. Check the brewer before trying another preset.');
+            throw new Error(accessory.context.lastBrewRejected
+              ? 'The last request was rejected. Wait a moment before trying another preset.'
+              : 'A brew was recently requested. Check the brewer before trying another preset.');
           }
           this.operations.add(id);
+          let submitted = false;
           try {
             this.log.info('Requesting ' + preset.name + ' on ' + accessory.displayName);
             await this.cloud.startBrew(id, preset, async state => {
@@ -68,13 +71,24 @@ class KeurigPlatform {
                 this.log.info(preset.name + ': pod recognition is unavailable. Brewer reports ready.');
               }
               accessory.context.nextBrew = Date.now() + 60000;
+              accessory.context.lastBrewRejected = false;
               this.api.updatePlatformAccessories([accessory]);
+              submitted = true;
             });
             this.log.info(preset.name + ': request accepted. Checking brewer state...');
             // Confirm in the background so HomeKit can acknowledge the momentary switch promptly.
             this.cloud.confirmBrew(id)
               .then(() => this.log.info(preset.name + ': brewer confirmed brewing.'))
               .catch(err => this.log.warn(preset.name + ': ' + err.message));
+          } catch (err) {
+            if (submitted && [400, 422].includes(err.status)) {
+              // A rejected request does not need the guard used for accepted or uncertain submissions.
+              // Keep a short debounce for repeated HomeKit writes from the same tap.
+              accessory.context.nextBrew = Date.now() + 2000;
+              accessory.context.lastBrewRejected = true;
+              this.api.updatePlatformAccessories([accessory]);
+            }
+            throw err;
           } finally {
             this.operations.delete(id);
           }

@@ -7,7 +7,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { authorization, callbackCode, redirect } = require('../login');
-const { KeurigCloud, saveSession, checkStorage } = require('../cloud');
+const { KeurigCloud, saveSession, checkStorage, errorDetail } = require('../cloud');
 
 test('browser login binds a fresh PKCE verifier and state to the Keurig callback', () => {
   const flow = authorization('test-client');
@@ -177,6 +177,31 @@ test('confirmation never retries a brew command', async () => {
   };
   await assert.rejects(cloud.confirmBrew('demo'), /start could not be confirmed/);
   assert.equal(commands, 0);
+});
+
+test('HTTP rejection preserves useful API detail and status without logging credentials', async t => {
+  const cloud = new KeurigCloud('', { subscriptionKey: 'sensitive-key' });
+  cloud.token = async () => 'sensitive-token';
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', async () => {
+    calls++;
+    return Response.json({
+      message: ['params.temp is invalid', 'sensitive-token sensitive-key user@example.com https://example.com/private'],
+      access_token: 'do-not-log-this',
+      errors: { size: ['size must be supported by this model'] },
+    }, { status: 400 });
+  });
+  await assert.rejects(cloud.command('demo', 'brew', { size: 4 }), error => {
+    assert.equal(error.status, 400);
+    assert.match(error.message, /params.temp is invalid/);
+    assert.match(error.message, /size must be supported/);
+    for (const secret of ['sensitive-token', 'sensitive-key', 'user@example.com', 'https://example.com', 'do-not-log-this']) {
+      assert.equal(error.message.includes(secret), false);
+    }
+    return true;
+  });
+  assert.equal(calls, 1);
+  assert.equal(errorDetail('<html>private page</html>'), '');
 });
 
 test('denied session storage identifies the directory before browser sign-in', async t => {

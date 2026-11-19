@@ -26,6 +26,33 @@ function describeState(state) {
 const issuer = 'https://login.keurig.com';
 const base = 'https://iot.keurig.com/connected-platform/';
 
+function errorDetail(data, secrets = []) {
+  const messages = [];
+  function collect(value, depth = 0) {
+    if (depth > 3 || messages.length >= 20) return;
+    if (typeof value === 'string' || typeof value === 'number') messages.push(String(value));
+    else if (Array.isArray(value)) value.slice(0, 5).forEach(item => collect(item, depth + 1));
+    else if (value && typeof value === 'object') {
+      for (const key of ['code', 'message', 'detail']) collect(value[key], depth + 1);
+    }
+  }
+  if (data && typeof data === 'object') {
+    for (const key of ['code', 'error', 'message', 'error_description', 'detail', 'title']) {
+      collect(data[key]);
+    }
+    if (data.errors && typeof data.errors === 'object') {
+      for (const value of Object.values(data.errors).slice(0, 5)) collect(value);
+    }
+  }
+  let text = [...new Set(messages)].join(' | ');
+  for (const secret of secrets.filter(Boolean)) text = text.split(secret).join('[redacted]');
+  return text.replace(/https?:\/\/[^\s"'<>]+/gi, '[URL redacted]')
+    .replace(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/gi, '[email redacted]')
+    .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
+    .replace(/[a-z0-9_=-]{32,}/gi, '[identifier redacted]')
+    .replace(/[\r\n\x00-\x1f]/g, ' ').slice(0, 700);
+}
+
 function storageError(error, operation, directory) {
   if (['EACCES', 'EPERM', 'EROFS'].includes(error.code)) {
     return new Error('Keurig storage permission error (' + error.code + ') while ' + operation +
@@ -111,8 +138,9 @@ class KeurigCloud {
   }
 
   async request(route, payload) {
+    const token = await this.token();
     const headers = {
-      Authorization: 'Bearer ' + await this.token(),
+      Authorization: 'Bearer ' + token,
       'Ocp-Apim-Subscription-Key': this.config.subscriptionKey,
     };
     if (payload) headers['Content-Type'] = 'application/json';
@@ -120,7 +148,13 @@ class KeurigCloud {
       method: payload ? 'POST' : 'GET', headers, redirect: 'error',
       signal: AbortSignal.timeout(15000), body: payload && JSON.stringify(payload),
     });
-    if (!response.ok) throw new Error('Keurig brewer API returned HTTP ' + response.status);
+    if (!response.ok) {
+      const data = await response.json().catch(() => null);
+      const detail = errorDetail(data, [token, this.config.subscriptionKey]);
+      const error = new Error('Keurig brewer API returned HTTP ' + response.status + (detail ? ' (' + detail + ')' : ''));
+      error.status = response.status;
+      throw error;
+    }
     if (!payload) return response.json();
   }
 
@@ -218,4 +252,4 @@ class KeurigCloud {
   }
 }
 
-module.exports = { KeurigCloud, exchange, saveSession, issuer, checkStorage, storageError, sizes, temperatures, strengths };
+module.exports = { KeurigCloud, exchange, saveSession, issuer, checkStorage, storageError, sizes, temperatures, strengths, errorDetail };
