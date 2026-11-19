@@ -1,6 +1,6 @@
 {
   "name": "homebridge-keurig",
-  "version": "0.2.2",
+  "version": "0.2.3-dev.0",
   "description": "Homebridge controls for Keurig SMART brewers using browser sign-in",
   "license": "MIT",
   "author": "dean1d",
@@ -14,7 +14,8 @@
   },
   "main": "index.js",
   "bin": {
-    "homebridge-keurig-login": "login.js"
+    "homebridge-keurig-login": "login.js",
+    "homebridge-keurig-diagnose": "diagnose.js"
   },
   "keywords": [
     "homebridge-plugin"
@@ -33,6 +34,7 @@
     "cloud.js",
     "settings.js",
     "login.js",
+    "diagnose.js",
     "config.schema.json",
     "README.md"
   ]

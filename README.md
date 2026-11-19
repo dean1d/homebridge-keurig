@@ -116,6 +116,12 @@ Start the Keurig child bridge, add its bridge to Apple Home when prompted, and t
 
 ## Development and distribution
 
+For a one-off HTTP 400 investigation, the development source includes a diagnostic command. It reads the existing Homebridge session without refreshing tokens. Its default mode reads status. Adding **--brew 4** explicitly requests one 4 oz coffee, with the normal readiness checks, and prints the response content type, byte count and redacted body if the request is rejected. Prepare a fresh pod and suitable mug before using that option. It sends no automatic retries and does not update the installed plugin.
+
+~~~sh
+npm exec --yes --package=github:dean1d/homebridge-keurig#main -- homebridge-keurig-diagnose /var/lib/homebridge --brew 4
+~~~
+
 The plugin has no runtime npm dependencies. npm test uses simulated Keurig responses. The package has been loaded against Homebridge 2.0.2 locally. Brew confirmation remains part of your acceptance test.
 
 Source and issue reports belong at [dean1d/homebridge-keurig](https://github.com/dean1d/homebridge-keurig). The plugin is MIT licensed. The first npm release is experimental and still needs a live account and brewer acceptance test.
