@@ -14,7 +14,7 @@ class KeurigPlatform {
     this.operations = new Set();
     this.cloud = new KeurigCloud(api.user.storagePath(), config);
     api.on('didFinishLaunching', () => {
-      log.info('Starting Keurig platform. Session storage: ' + api.user.storagePath());
+      log.info('Starting Keurig platform v' + require('./package.json').version + '. Session storage: ' + api.user.storagePath());
       this.poll();
     });
     api.on('shutdown', () => { this.stopped = true; clearTimeout(this.timer); });
@@ -40,7 +40,7 @@ class KeurigPlatform {
         }
       });
 
-    const presets = this.presets(accessory.context.favorites || []);
+    const presets = this.presets(accessory.context.favorites || [], accessory.context.model);
     const wanted = new Set(['power', ...presets.map(preset => preset.subtype)]);
     for (const service of [...accessory.services]) {
       if (service.UUID === Service.Switch.UUID && !wanted.has(service.subtype)) accessory.removeService(service);
@@ -112,7 +112,7 @@ class KeurigPlatform {
     service.setCharacteristic(Characteristic.ConfiguredName, name);
   }
 
-  presets(favorites) {
+  presets(favorites, model) {
     if (!this.config.enableBrew) return [];
     const temperature = this.config.brewTemperature || 'Hot';
     const strength = this.config.brewStrength || 'Balanced';
@@ -122,6 +122,10 @@ class KeurigPlatform {
     }));
     presets.push({ subtype: 'iced', name: 'Brew Over Ice 6 oz', mode: 'iced' },
       { subtype: 'cancel', name: 'Cancel Brew', mode: 'cancel' });
+    if (['K27', 'K27C'].includes(model)) {
+      presets.push(...[2, 4].map(size => ({ subtype: 'shot-' + size,
+        name: 'Brew ' + size + ' oz Shot', size, mode: 'shot' })));
+    }
     if (this.config.enableRecommended) {
       presets.push(...sizes.map(size => ({ subtype: 'recommended-' + size,
         name: 'BrewID ' + size + ' oz Coffee', size, mode: 'recommended' })));
@@ -143,30 +147,34 @@ class KeurigPlatform {
       const devices = await this.cloud.devices();
       let favorites;
       if (this.config.enableBrew && this.config.enableFavorites !== false) {
-        try { favorites = (await this.cloud.favorites()).map(({ id, name }) => ({ id, name })); }
+        try { favorites = (await this.cloud.favorites()).map(({ id, name, deviceModel }) => ({ id, name, deviceModel })); }
         catch (err) { this.log.warn('Keurig favorites: ' + err.message); }
       }
       const seen = new Set();
       for (const device of devices) {
         if (this.stopped) return;
         const uuid = this.api.hap.uuid.generate(plugin + ':' + device.id);
+        const deviceFavorites = favorites?.filter(favorite => !favorite.deviceModel || favorite.deviceModel === device.model);
         seen.add(uuid);
         let accessory = this.accessories.get(uuid);
         if (!accessory) {
           accessory = new this.api.platformAccessory(device.registration?.name || 'Keurig', uuid);
           accessory.context.deviceId = device.id;
+          accessory.context.model = device.model;
           const { Service, Characteristic } = this.api.hap;
           accessory.getService(Service.AccessoryInformation)
             .setCharacteristic(Characteristic.Manufacturer, 'Keurig')
             .setCharacteristic(Characteristic.Model, String(device.model || 'SMART'))
             .setCharacteristic(Characteristic.SerialNumber, String(device.serialNumber || device.id));
-          accessory.context.favorites = favorites || [];
+          accessory.context.favorites = deviceFavorites || [];
           this.bind(accessory, device.id);
           this.api.registerPlatformAccessories(plugin, platform, [accessory]);
           this.accessories.set(uuid, accessory);
           this.log.info('Discovered ' + accessory.displayName + '. Published Power and configured brew presets.');
-        } else if (favorites && JSON.stringify(favorites) !== JSON.stringify(accessory.context.favorites)) {
-          accessory.context.favorites = favorites;
+        } else if (accessory.context.model !== device.model ||
+            (deviceFavorites && JSON.stringify(deviceFavorites) !== JSON.stringify(accessory.context.favorites))) {
+          accessory.context.model = device.model;
+          if (deviceFavorites) accessory.context.favorites = deviceFavorites;
           this.bind(accessory, device.id);
           this.api.updatePlatformAccessories([accessory]);
         }

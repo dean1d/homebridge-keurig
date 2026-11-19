@@ -60,6 +60,7 @@ test('concurrent discovery shares a refresh and restart reuses the rotated sessi
 
 test('brewer state preserves pod and lock information for actionable brew errors', async () => {
   const cloud = new KeurigCloud('', {});
+  cloud.models.set('demo', 'K29');
   const props = [
     { name: 'appl_state', value: { current: 'IDLE' } },
     { name: 'brew_state', value: { current: 'BREW_READY' } },
@@ -79,6 +80,7 @@ test('brewer state preserves pod and lock information for actionable brew errors
 
 test('all coffee sizes, iced, water, BrewID and favorites send their own recipe', async () => {
   const cloud = new KeurigCloud('', {});
+  cloud.models.set('demo', 'K29');
   let pod = 'PUNCHED';
   cloud.state = async () => ({ on: true, ready: true, pod,
     recipes: [{ size: 8, temp: 197, flow_rate: 2957 }] });
@@ -110,6 +112,7 @@ test('all coffee sizes, iced, water, BrewID and favorites send their own recipe'
 
 test('brew refusal, missing recipes and wake-up failures send no brew command', async () => {
   const cloud = new KeurigCloud('', {});
+  cloud.models.set('demo', 'K29');
   const state = { on: true, ready: false, appliance: 'IDLE', brewer: 'BREW_LOCKED',
     pod: 'PUNCHED', lock: 'PM_NOT_CYCLED', recipes: [] };
   cloud.state = async () => state;
@@ -132,6 +135,7 @@ test('brew refusal, missing recipes and wake-up failures send no brew command', 
 
 test('K-Cafe null and missing recognition allow coffee only while the brewer is ready', async () => {
   const cloud = new KeurigCloud('', {});
+  cloud.models.set('demo', 'K29');
   const properties = [
     { name: 'appl_state', value: { current: 'IDLE' } },
     { name: 'brew_state', value: { current: 'BREW_READY', lock_cause: null, error: null } },
@@ -168,6 +172,7 @@ test('K-Cafe null and missing recognition allow coffee only while the brewer is 
 
 test('confirmation never retries a brew command', async () => {
   const cloud = new KeurigCloud('', {});
+  cloud.models.set('demo', 'K29');
   let commands = 0;
   cloud.command = async () => { commands++; };
   cloud.waitForState = async (_id, predicate) => {
@@ -177,6 +182,113 @@ test('confirmation never retries a brew command', async () => {
   };
   await assert.rejects(cloud.confirmBrew('demo'), /start could not be confirmed/);
   assert.equal(commands, 0);
+});
+
+test('K27 discovery selects v2 enums and sends one custom brew without legacy units', async t => {
+  const cloud = new KeurigCloud('', {});
+  cloud.token = async () => 'example-token';
+  const commands = [];
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    if (url.endsWith('/profile')) return Response.json({ customerID: 'customer' });
+    if (url.includes('/devices?')) return Response.json({ devices: [{ id: 'cafe', model: 'K27' }] });
+    if (url.endsWith('/properties')) return Response.json([
+      { name: 'appl_state', value: { current: 'IDLE' } },
+      { name: 'brew_state', value: { current: 'BREW_READY', lock_cause: '', error: '' } },
+      { name: 'lid_recog_result', value: { pm_content: null } },
+    ]);
+    assert.ok(url.endsWith('/cafe/commands'));
+    commands.push(JSON.parse(options.body));
+    return new Response(null, { status: 202 });
+  });
+  let submitted = 0;
+  await cloud.startBrew('cafe', { mode: 'coffee', size: 6, temperature: 'Hot', strength: 'Balanced' },
+    async () => { submitted++; });
+  assert.equal(submitted, 1);
+  // Keurig's K27 mapping defines 6 oz = 3, Hot = 3, Balanced = 1, Custom = 13.
+  assert.deepEqual(commands, [{ command_name: 'brew', params: {
+    recipe_format_version: '2.0', size: 3, temperature: 3, strength: 1, brew_type: 13,
+    extensions: { key1: 'value1' },
+  } }]);
+});
+
+test('v2 sizes, temperatures, strengths, shots, iced, BrewID and saved favorites retain their meaning', async () => {
+  const cloud = new KeurigCloud('', {});
+  cloud.models.set('cafe', 'K27');
+  let pod = 'UNKNOWN';
+  cloud.state = async () => ({ on: true, ready: true, pod,
+    recipes: [{ size: 4, temperature: 7, strength: 4 }] });
+  const commands = [];
+  cloud.command = async (...args) => commands.push(args);
+  const submit = async () => {};
+  for (const [ounces, code] of [[4, 2], [6, 3], [8, 4], [10, 5], [12, 6]]) {
+    await cloud.startBrew('cafe', { mode: 'coffee', size: ounces, temperature: 'Extra Hot', strength: 'Intense' }, submit);
+    assert.equal(commands.at(-1)[2].size, code);
+    assert.equal(commands.at(-1)[2].temperature, 4);
+    assert.equal(commands.at(-1)[2].strength, 5);
+  }
+  await cloud.startBrew('cafe', { mode: 'shot', size: 4 }, submit);
+  assert.equal(commands.at(-1)[2].size, 2);
+  assert.equal(commands.at(-1)[2].brew_type, 6);
+  assert.equal(commands.at(-1)[2].strength, 0);
+  assert.equal(commands.at(-1)[2].temperature, 0);
+  await cloud.startBrew('cafe', { mode: 'iced' }, submit);
+  assert.equal(commands.at(-1)[2].brew_type, 5);
+  assert.equal(commands.at(-1)[2].size, 3);
+  assert.equal(commands.at(-1)[2].temperature, 2);
+  await cloud.startBrew('cafe', { mode: 'recommended', size: 8 }, submit);
+  assert.equal(commands.at(-1)[2].brew_type, 11);
+  assert.equal(commands.at(-1)[2].strength, 4);
+  cloud.favorites = async () => [{ id: 'favorite', deviceModel: 'K27', recipe: {
+    recipe_format_version: '2.0', size: 5, temperature: 6, strength: 2, brew_type: 12,
+  } }];
+  await cloud.startBrew('cafe', { mode: 'favorite', favoriteId: 'favorite' }, submit);
+  assert.equal(commands.at(-1)[2].size, 5);
+  assert.equal(commands.at(-1)[2].temperature, 6);
+  assert.equal(commands.at(-1)[2].brew_type, 12);
+  pod = 'EMPTY';
+  await cloud.startBrew('cafe', { mode: 'water', size: 12 }, submit);
+  assert.equal(commands.at(-1)[2].size, 6);
+  assert.equal(commands.at(-1)[2].brew_type, 1);
+});
+
+test('unknown models, incompatible favorites and invalid v2 recipes send no commands', async () => {
+  const cloud = new KeurigCloud('', {});
+  cloud.models.set('cafe', 'unverified');
+  cloud.state = async () => ({ on: true, ready: true, pod: 'UNKNOWN', recipes: [] });
+  let commands = 0;
+  cloud.command = async () => { commands++; };
+  const submit = async () => { throw new Error('must not submit'); };
+  await assert.rejects(cloud.startBrew('cafe', { mode: 'coffee', size: 6 }, submit), /format is not verified/);
+  cloud.models.set('cafe', 'K27');
+  cloud.favorites = async () => [{ id: 'wrong', deviceModel: 'K28', recipe: {} }];
+  await assert.rejects(cloud.startBrew('cafe', { mode: 'favorite', favoriteId: 'wrong' }, submit), /unavailable/);
+  cloud.favorites = async () => [{ id: 'old', size: 8, temperature: 194, flowRate: 4435 }];
+  await assert.rejects(cloud.startBrew('cafe', { mode: 'favorite', favoriteId: 'old' }, submit), /version 2.0 recipe/);
+  cloud.favorites = async () => [{ id: 'bad', recipe: {
+    recipe_format_version: '2.0', size: 8, temperature: 194, strength: 4435, brew_type: 12,
+  } }];
+  await assert.rejects(cloud.startBrew('cafe', { mode: 'favorite', favoriteId: 'bad' }, submit), /unsupported size/);
+  await assert.rejects(cloud.startBrew('cafe', { mode: 'coffee', size: 7 }, submit), /unsupported size/);
+  await assert.rejects(cloud.startBrew('cafe', { mode: 'shot', size: 6 }, submit), /unsupported size/);
+  cloud.models.set('cafe', 'K28');
+  await assert.rejects(cloud.startBrew('cafe', { mode: 'shot', size: 4 }, submit), /not supported/);
+  assert.equal(commands, 0);
+});
+
+test('Keurig errors[].description is visible with the device identifier redacted', async t => {
+  const cloud = new KeurigCloud('', {});
+  cloud.token = async () => 'example';
+  t.mock.method(globalThis, 'fetch', async () => Response.json({
+    statusCode: 400, statusDescription: 'BadRequest', errors: [{ name: 'brew',
+      description: "The device command 'brew' is not supported (DeviceId='short-private-id')",
+    }],
+  }, { status: 400 }));
+  await assert.rejects(cloud.command('short-private-id', 'brew', {}), error => {
+    assert.equal(error.status, 400);
+    assert.match(error.message, /The device command 'brew' is not supported/);
+    assert.equal(error.message.includes('short-private-id'), false);
+    return true;
+  });
 });
 
 test('HTTP rejection preserves useful API detail and status without logging credentials', async t => {

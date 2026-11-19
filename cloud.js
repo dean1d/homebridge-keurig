@@ -10,6 +10,30 @@ const sizes = [4, 6, 8, 10, 12];
 const temperatures = { Warm: 187, Warmer: 191, Hot: 194, Hotter: 197, 'Extra Hot': 200, 'Max Hot': 204 };
 const strengths = { Balanced: 4435, Rich: 3942, Robust: 3449, Strong: 2957, Intense: 2464 };
 
+// Protocol values from Keurig's public K27/K28 RemoteBrew capability mapping,
+// checked against Android app 2.2622.0 on 2026-11-19. Values are enums, not units.
+const v2Models = new Set(['K27', 'K27C', 'K28', 'K28C', 'K28B']);
+const v2Temperatures = { Warm: 5, Warmer: 6, Hot: 3, Hotter: 7, 'Extra Hot': 4, 'Max Hot': 8 };
+const v2Strengths = { Balanced: 1, Rich: 2, Robust: 3, Strong: 4, Intense: 5 };
+
+function recipeVersion(model) {
+  if (v2Models.has(model)) return '2.0';
+  if (['K29', 'K29C'].includes(model)) return '1.0';
+  throw new Error('Brew recipe format is not verified for model ' + (model || 'UNKNOWN') + '.');
+}
+
+function validateV2Recipe(recipe, model) {
+  const allowedSizes = ['K27', 'K27C'].includes(model) ? [1, 2, 3, 4, 5, 6] : [3, 4, 5, 6];
+  if (recipe.recipe_format_version !== '2.0' || !allowedSizes.includes(recipe.size) ||
+      ![1, 2, 5, 6, 7, 11, 12, 13, 17].includes(recipe.brew_type) ||
+      (recipe.brew_type === 6
+        ? ![1, 2].includes(recipe.size) || recipe.strength !== 0 || recipe.temperature !== 0
+        : ![1, 2, 3, 4, 5].includes(recipe.strength) || ![2, 3, 4, 5, 6, 7, 8].includes(recipe.temperature))) {
+    throw new Error('This brew recipe has unsupported size, temperature or strength settings for ' + model + '.');
+  }
+  return recipe;
+}
+
 function validateRecipe(recipe) {
   if (!sizes.includes(recipe.size) || !Number.isFinite(recipe.temp) || recipe.temp < 150 || recipe.temp > 212 ||
       !Number.isFinite(recipe.flow_rate) || recipe.flow_rate <= 0 || recipe.flow_rate > 10000) {
@@ -33,11 +57,11 @@ function errorDetail(data, secrets = []) {
     if (typeof value === 'string' || typeof value === 'number') messages.push(String(value));
     else if (Array.isArray(value)) value.slice(0, 5).forEach(item => collect(item, depth + 1));
     else if (value && typeof value === 'object') {
-      for (const key of ['code', 'message', 'detail']) collect(value[key], depth + 1);
+      for (const key of ['code', 'message', 'description', 'detail']) collect(value[key], depth + 1);
     }
   }
   if (data && typeof data === 'object') {
-    for (const key of ['code', 'error', 'message', 'error_description', 'detail', 'title']) {
+    for (const key of ['code', 'error', 'message', 'error_description', 'statusDescription', 'detail', 'title']) {
       collect(data[key]);
     }
     if (data.errors && typeof data.errors === 'object') {
@@ -114,6 +138,7 @@ class KeurigCloud {
     this.config = { ...defaults, ...config };
     this.config.clientId ||= defaults.clientId;
     this.config.subscriptionKey ||= defaults.subscriptionKey;
+    this.models = new Map();
   }
 
   async token() {
@@ -150,7 +175,8 @@ class KeurigCloud {
     });
     if (!response.ok) {
       const data = await response.json().catch(() => null);
-      const detail = errorDetail(data, [token, this.config.subscriptionKey]);
+      const deviceId = route.match(/\/devices\/([^/?]+)/)?.[1];
+      const detail = errorDetail(data, [token, this.config.subscriptionKey, deviceId && decodeURIComponent(deviceId)]);
       const error = new Error('Keurig brewer API returned HTTP ' + response.status + (detail ? ' (' + detail + ')' : ''));
       error.status = response.status;
       throw error;
@@ -163,6 +189,7 @@ class KeurigCloud {
     if (!profile.customerID) throw new Error('The Keurig profile has no customer ID.');
     const list = await this.request('api/alcm/v1/devices?customerId=' + encodeURIComponent(profile.customerID));
     if (!Array.isArray(list.devices) || list.devices.some(d => !d?.id)) throw new Error('Unexpected Keurig device list.');
+    this.models = new Map(list.devices.map(device => [device.id, device.model]));
     return list.devices;
   }
 
@@ -198,6 +225,9 @@ class KeurigCloud {
   }
 
   async startBrew(id, preset, submitted) {
+    if (!this.models.has(id)) await this.devices();
+    const model = this.models.get(id);
+    const version = recipeVersion(model);
     let state = await this.state(id);
     if (!state.on) {
       await this.command(id, 'idle');
@@ -209,6 +239,56 @@ class KeurigCloud {
     } else if (state.pod === 'EMPTY') {
       throw new Error('Load a pod and lower the handle (' + describeState(state) + ').');
     }
+    let params;
+    if (version === '2.0') {
+      params = await this.v2Recipe(model, preset, state);
+    } else {
+      params = await this.legacyRecipe(preset, state);
+    }
+    await submitted(state);
+    await this.command(id, 'brew', params);
+  }
+
+  async v2Recipe(model, preset, state) {
+    let params = { recipe_format_version: '2.0', size: preset.size / 2,
+      temperature: v2Temperatures[preset.temperature || 'Hot'],
+      strength: v2Strengths[preset.strength || 'Balanced'], brew_type: 13 };
+    switch (preset.mode) {
+      case 'shot':
+        if (!['K27', 'K27C'].includes(model)) throw new Error('Shots are not supported by this brewer.');
+        params = { ...params, brew_type: 6, strength: 0, temperature: 0 };
+        break;
+      case 'water':
+        params = { ...params, brew_type: 1, strength: 1 };
+        break;
+      case 'iced':
+        params = { ...params, size: 3, temperature: 2, strength: 5, brew_type: 5 };
+        break;
+      case 'recommended': {
+        const recipe = state.recipes.find(recipe => recipe.size === params.size);
+        if (!recipe) throw new Error('BrewID has no recommended recipe for ' + preset.size + ' oz.');
+        params = { ...params, temperature: recipe.temperature, strength: recipe.strength, brew_type: 11 };
+        break;
+      }
+      case 'favorite': {
+        const favorite = (await this.favorites()).find(favorite => favorite.id === preset.favoriteId &&
+          (!favorite.deviceModel || favorite.deviceModel === model));
+        if (!favorite) throw new Error('This favorite is unavailable for this brewer in the Keurig app.');
+        const recipe = favorite.recipe;
+        if (recipe?.recipe_format_version !== '2.0') {
+          throw new Error('This favorite does not contain a version 2.0 recipe. Save it for this brewer in the Keurig app.');
+        }
+        params = { recipe_format_version: '2.0', size: recipe.size,
+          temperature: recipe.temperature, strength: recipe.strength, brew_type: recipe.brew_type };
+        break;
+      }
+    }
+    // The current mobile client includes this fixed extension object on v2 brews.
+    return { ...validateV2Recipe(params, model), extensions: { key1: 'value1' } };
+  }
+
+  async legacyRecipe(preset, state) {
+    if (preset.mode === 'shot') throw new Error('Shots are not supported by this brewer.');
     let params = { size: preset.size, temp: temperatures[preset.temperature || 'Hot'],
       flow_rate: strengths[preset.strength || 'Balanced'], brew_type: 'NORMAL',
       enhanced: true, category: 'CUSTOM' };
@@ -233,9 +313,7 @@ class KeurigCloud {
         break;
       }
     }
-    validateRecipe(params);
-    await submitted(state);
-    await this.command(id, 'brew', params);
+    return validateRecipe(params);
   }
 
   async confirmBrew(id) {
@@ -252,4 +330,4 @@ class KeurigCloud {
   }
 }
 
-module.exports = { KeurigCloud, exchange, saveSession, issuer, checkStorage, storageError, sizes, temperatures, strengths, errorDetail };
+module.exports = { KeurigCloud, exchange, saveSession, issuer, checkStorage, storageError, sizes, temperatures, strengths, errorDetail, recipeVersion };

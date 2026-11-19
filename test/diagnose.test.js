@@ -33,14 +33,16 @@ test('one-off brew diagnostic captures the 400 body and sends exactly one brew',
   let brews = 0;
   t.mock.method(globalThis, 'fetch', async (url, options) => {
     if (url.endsWith('/profile')) return Response.json({ customerID: 'customer' });
-    if (url.includes('/devices?')) return Response.json({ devices: [{ id: 'private-device', model: 'K-Cafe SMART' }] });
+    if (url.includes('/devices?')) return Response.json({ devices: [{ id: 'private-device', model: 'K27' }] });
     if (url.endsWith('/properties')) return Response.json([
       { name: 'appl_state', value: { current: 'IDLE' } },
       { name: 'brew_state', value: { current: 'BREW_READY' } },
       { name: 'lid_recog_result', value: { pm_content: null } },
     ]);
     assert.equal(url.endsWith('/commands'), true);
-    assert.equal(JSON.parse(options.body).params.size, 4);
+    const params = JSON.parse(options.body).params;
+    assert.equal(params.recipe_format_version, '2.0');
+    assert.equal(params.size, 2); // K27's enum for 4 oz, not 2 oz.
     brews++;
     return Response.json({ Message: 'Invalid brew parameters', Extra: { deviceId: 'private-device' } }, { status: 400 });
   });
