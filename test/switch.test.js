@@ -119,3 +119,65 @@ test('a restart preserves the accepted repeat window and cooldown without resend
   await assert.rejects(restarted.brew(accessory, 'cafe', preset));
   assert.equal(commands, 0);
 });
+
+test('sequential retries after a failed wake-up check share one failure and send zero brew commands', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: 100000 });
+  const { platform, accessory, preset, warnings, messages } = setup();
+  platform.cloud.models.set('cafe', 'K27');
+  const state = { on: false, ready: false, appliance: 'STANDBY', brewer: 'BREW_LOCKED',
+    pod: 'UNKNOWN', lock: 'PM_NOT_CYCLED', recipes: [] };
+  let checks = 0;
+  platform.cloud.state = async () => { checks++; return { ...state }; };
+  const commands = [];
+  platform.cloud.command = async (_id, command) => {
+    commands.push(command);
+    if (command === 'idle') { state.on = true; state.appliance = 'IDLE'; }
+  };
+  platform.cloud.waitForState = async () => {
+    throw new Error('Brewer did not reach the expected state (power=IDLE, brewer=BREW_LOCKED, lock=PM_NOT_CYCLED).');
+  };
+  let originalError;
+  await assert.rejects(platform.brew(accessory, 'cafe', preset), error => {
+    originalError = error;
+    return true;
+  });
+  for (let i = 0; i < 7; i++) {
+    t.mock.timers.tick(500);
+    await assert.rejects(platform.brew(accessory, 'cafe', preset), error => error === originalError);
+  }
+  assert.deepEqual(commands, ['idle']);
+  assert.equal(checks, 1);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /PM_NOT_CYCLED/);
+  assert.equal(messages.filter(message => message.startsWith('Checking brewer readiness')).length, 1);
+  assert.equal(messages.some(message => message.startsWith('Sending ')), false);
+  // A fresh user action after preparation and the short retry window can brew.
+  t.mock.timers.tick(6500);
+  state.ready = true;
+  state.brewer = 'BREW_READY';
+  state.lock = '';
+  await platform.brew(accessory, 'cafe', preset);
+  assert.deepEqual(commands, ['idle', 'brew']);
+  assert.equal(checks, 2);
+  assert.equal(messages.filter(message => message.startsWith('Sending ')).length, 1);
+});
+
+test('cached preparation failure does not block a different preset or hide its result', async () => {
+  const { platform, accessory, preset, warnings } = setup();
+  let attempts = 0;
+  platform.cloud.startBrew = async (_id, selected, submitted) => {
+    attempts++;
+    if (selected.subtype === preset.subtype) throw new Error('Recipe unavailable');
+    await submitted({ pod: 'POD' });
+  };
+  await assert.rejects(platform.brew(accessory, 'cafe', preset));
+  await assert.rejects(platform.brew(accessory, 'cafe', preset));
+  assert.equal(attempts, 1);
+  const other = { ...preset, subtype: 'coffee-6', name: 'Brew 6 oz Coffee' };
+  await platform.brew(accessory, 'cafe', other);
+  assert.equal(attempts, 2);
+  assert.equal(warnings.length, 1);
+  assert.equal(accessory.context.lastBrewAccepted, true);
+  await assert.rejects(platform.brew(accessory, 'cafe', preset));
+  assert.equal(attempts, 2);
+});

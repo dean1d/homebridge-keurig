@@ -1,6 +1,6 @@
 {
   "name": "homebridge-keurig",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Homebridge controls for Keurig SMART brewers using browser sign-in",
   "license": "MIT",
   "author": "dean1d",

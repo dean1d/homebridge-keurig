@@ -13,6 +13,7 @@ class KeurigPlatform {
     this.accessories = new Map();
     this.operations = new Map();
     this.blockedWrites = new Map();
+    this.preparationFailures = new Map();
     this.cloud = new KeurigCloud(api.user.storagePath(), config);
     api.on('didFinishLaunching', () => {
       log.info('Starting Keurig platform v' + require('./package.json').version + '. Session storage: ' + api.user.storagePath());
@@ -99,18 +100,32 @@ class KeurigPlatform {
       }
       return Promise.reject(new this.api.hap.HapStatusError(this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE));
     }
+    const previousFailure = this.preparationFailures.get(id);
+    if (previousFailure?.subtype === preset.subtype && Date.now() < previousFailure.until) {
+      return Promise.reject(previousFailure.error);
+    }
+    this.preparationFailures.delete(id);
     this.blockedWrites.delete(id);
-    const promise = this.performBrew(accessory, id, preset)
-      .catch(error => { throw this.brewFailure(preset, error); })
+    const operation = { subtype: preset.subtype, submitted: false };
+    const promise = this.performBrew(accessory, id, preset, operation)
+      .catch(error => {
+        const failure = this.brewFailure(preset, error);
+        if (!operation.submitted) {
+          // Some controllers retry a failed write after its handler has finished.
+          // Retain the failure briefly without retrying preparation or claiming success.
+          this.preparationFailures.set(id, { subtype: preset.subtype, until: Date.now() + 10000, error: failure });
+        }
+        throw failure;
+      })
       .finally(() => this.operations.delete(id));
-    this.operations.set(id, { subtype: preset.subtype, promise });
+    operation.promise = promise;
+    this.operations.set(id, operation);
     return promise;
   }
 
-  async performBrew(accessory, id, preset) {
-    let submitted = false;
+  async performBrew(accessory, id, preset, operation) {
     try {
-      this.log.info('Requesting ' + preset.name + ' on ' + accessory.displayName);
+      this.log.info('Checking brewer readiness for ' + preset.name + ' on ' + accessory.displayName);
       await this.cloud.startBrew(id, preset, async state => {
         if (state.pod === 'UNKNOWN') {
           this.log.info(preset.name + ': pod recognition is unavailable. Brewer reports ready.');
@@ -120,7 +135,8 @@ class KeurigPlatform {
         accessory.context.lastBrewAccepted = false;
         accessory.context.lastBrewPreset = preset.subtype;
         this.api.updatePlatformAccessories([accessory]);
-        submitted = true;
+        operation.submitted = true;
+        this.log.info('Sending ' + preset.name + ' command to ' + accessory.displayName);
       });
       accessory.context.lastBrewAccepted = true;
       accessory.context.lastBrewAcceptedAt = Date.now();
@@ -131,7 +147,7 @@ class KeurigPlatform {
         .then(() => this.log.info(preset.name + ': brewer confirmed brewing.'))
         .catch(err => this.log.warn(preset.name + ': ' + err.message));
     } catch (err) {
-      if (submitted && [400, 422].includes(err.status)) {
+      if (operation.submitted && [400, 422].includes(err.status)) {
         // Keep a short debounce for repeated writes after a definite rejection.
         accessory.context.nextBrew = Date.now() + 2000;
         accessory.context.lastBrewRejected = true;

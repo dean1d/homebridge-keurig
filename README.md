@@ -18,6 +18,8 @@ A request wakes a sleeping brewer and briefly waits for readiness. If preparatio
 
 Version **0.2.4** handles repeated HomeKit/UI switch writes from one tap. Writes to the same preset share an in-flight request and its result. Repeats within two seconds after API acceptance are acknowledged quietly without sending another command. Genuine failures still propagate, and later taps or another preset remain subject to the shared guard. Repeated blocked writes log one **ignored** warning per preset and guard instead of repeated brew-failure messages.
 
+Version **0.2.5** also retains a preparation failure for ten seconds after the check finishes. Sequential retries of the same preset receive the original failure without repeating readiness checks, waking the brewer again, or duplicating log messages. After fixing preparation, wait ten seconds from the failure before retrying that preset. This window does not automatically start a brew when it expires. The logs now distinguish **Checking brewer readiness** from **Sending [preset] command**. A readiness failure can involve a power-on command, but no brew command is sent.
+
 API rejections include Keurig's **errors[].description** and returned validation messages with credentials and identifiers redacted. An explicit HTTP 400 or 422 brew rejection uses a two-second debounce instead of the 60-second guard. Accepted requests and ambiguous failures such as timeouts retain the longer guard.
 
 Browser sign-in follows the [Home Assistant OAuth pull request](https://github.com/AdamSand10/homeassistant-keurig/pull/1) at revision 3af466915dd191d160ff3d0f0b5adcaddaedd215. Public web client settings come from that reference. You sign in to Keurig in your browser, then paste the callback URL into your local terminal. The plugin verifies its state and exchanges the code using PKCE. No separate OAuth registration is needed for this flow. Keurig's undocumented service may change.
@@ -58,11 +60,11 @@ Then follow the sign-in steps below, starting with step 3. Use a Keurig child br
 
 These commands assume the official Homebridge Docker image with persistent storage mounted at **/homebridge**, as documented in the [Docker image setup](https://github.com/homebridge/docker-homebridge). Substitute the configured storage path for another image.
 
-1. Copy **homebridge-keurig-0.2.4.tgz** from this project to the NAS folder mapped to **/homebridge** in your container. Use your NAS file manager or network share.
+1. Copy **homebridge-keurig-0.2.5.tgz** from this project to the NAS folder mapped to **/homebridge** in your container. Use your NAS file manager or network share.
 2. Open Homebridge UI on the other computer and choose **Terminal**. Confirm **/homebridge/config.json** exists, then install:
 
 ~~~sh
-npm --prefix /homebridge install /homebridge/homebridge-keurig-0.2.4.tgz
+npm --prefix /homebridge install /homebridge/homebridge-keurig-0.2.5.tgz
 ~~~
 
 3. Run sign-in in that terminal:
@@ -92,10 +94,10 @@ npm test
 npm pack
 ~~~
 
-Copy **homebridge-keurig-0.2.4.tgz** to the Homebridge host. From the folder containing that file, a standard Linux hb-service installation can install it with:
+Copy **homebridge-keurig-0.2.5.tgz** to the Homebridge host. From the folder containing that file, a standard Linux hb-service installation can install it with:
 
 ~~~sh
-npm --prefix /var/lib/homebridge install ./homebridge-keurig-0.2.4.tgz
+npm --prefix /var/lib/homebridge install ./homebridge-keurig-0.2.5.tgz
 ~~~
 
 Use the service user's normal permissions. Docker and NAS installations should run the install inside the Homebridge container and use its plugin and storage paths. Windows installations should use their configured plugin directory.
