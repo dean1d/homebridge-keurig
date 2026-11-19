@@ -11,7 +11,8 @@ class KeurigPlatform {
     this.config = config;
     this.api = api;
     this.accessories = new Map();
-    this.operations = new Set();
+    this.operations = new Map();
+    this.blockedWrites = new Map();
     this.cloud = new KeurigCloud(api.user.storagePath(), config);
     api.on('didFinishLaunching', () => {
       log.info('Starting Keurig platform v' + require('./package.json').version + '. Session storage: ' + api.user.storagePath());
@@ -53,52 +54,90 @@ class KeurigPlatform {
         if (!on) return;
         try {
           if (preset.mode === 'cancel') {
-            await this.cloud.command(id, 'cancel_brew');
-            this.log.info('Cancel brew requested.');
+            try {
+              await this.cloud.command(id, 'cancel_brew');
+              this.log.info('Cancel brew requested.');
+            } catch (err) {
+              throw this.brewFailure(preset, err);
+            }
             return;
           }
-          if (this.operations.has(id) || Date.now() < (accessory.context.nextBrew || 0)) {
-            throw new Error(accessory.context.lastBrewRejected
-              ? 'The last request was rejected. Wait a moment before trying another preset.'
-              : 'A brew was recently requested. Check the brewer before trying another preset.');
-          }
-          this.operations.add(id);
-          let submitted = false;
-          try {
-            this.log.info('Requesting ' + preset.name + ' on ' + accessory.displayName);
-            await this.cloud.startBrew(id, preset, async state => {
-              if (state.pod === 'UNKNOWN') {
-                this.log.info(preset.name + ': pod recognition is unavailable. Brewer reports ready.');
-              }
-              accessory.context.nextBrew = Date.now() + 60000;
-              accessory.context.lastBrewRejected = false;
-              this.api.updatePlatformAccessories([accessory]);
-              submitted = true;
-            });
-            this.log.info(preset.name + ': request accepted. Checking brewer state...');
-            // Confirm in the background so HomeKit can acknowledge the momentary switch promptly.
-            this.cloud.confirmBrew(id)
-              .then(() => this.log.info(preset.name + ': brewer confirmed brewing.'))
-              .catch(err => this.log.warn(preset.name + ': ' + err.message));
-          } catch (err) {
-            if (submitted && [400, 422].includes(err.status)) {
-              // A rejected request does not need the guard used for accepted or uncertain submissions.
-              // Keep a short debounce for repeated HomeKit writes from the same tap.
-              accessory.context.nextBrew = Date.now() + 2000;
-              accessory.context.lastBrewRejected = true;
-              this.api.updatePlatformAccessories([accessory]);
-            }
-            throw err;
-          } finally {
-            this.operations.delete(id);
-          }
-        } catch (err) {
-          this.log.warn(preset.name + ' failed: ' + err.message);
-          throw new this.api.hap.HapStatusError(this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+          await this.brew(accessory, id, preset);
         } finally {
           setTimeout(() => action.updateCharacteristic(Characteristic.On, false), 150).unref();
         }
       });
+    }
+  }
+
+  brewFailure(preset, error) {
+    this.log.warn(preset.name + ' failed: ' + error.message);
+    return new this.api.hap.HapStatusError(this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+  }
+
+  brew(accessory, id, preset) {
+    const active = this.operations.get(id);
+    // Repeated writes from one tap share the original result, including failures.
+    if (active?.subtype === preset.subtype) return active.promise;
+    const guarded = Date.now() < (accessory.context.nextBrew || 0);
+    if (guarded && accessory.context.lastBrewAccepted && accessory.context.lastBrewPreset === preset.subtype &&
+        Date.now() < (accessory.context.lastBrewAcceptedAt || 0) + 2000) {
+      return Promise.resolve();
+    }
+    if (active || guarded) {
+      const guard = active || accessory.context.nextBrew;
+      let blocked = this.blockedWrites.get(id);
+      if (!blocked || blocked.guard !== guard) {
+        blocked = { guard, subtypes: new Set() };
+        this.blockedWrites.set(id, blocked);
+      }
+      if (!blocked.subtypes.has(preset.subtype)) {
+        this.log.warn(preset.name + ' ignored: ' + (accessory.context.lastBrewRejected
+          ? 'The last request was rejected. Wait a moment before trying another preset.'
+          : 'A brew was recently requested. Check the brewer before trying another preset.'));
+        blocked.subtypes.add(preset.subtype);
+      }
+      return Promise.reject(new this.api.hap.HapStatusError(this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE));
+    }
+    this.blockedWrites.delete(id);
+    const promise = this.performBrew(accessory, id, preset)
+      .catch(error => { throw this.brewFailure(preset, error); })
+      .finally(() => this.operations.delete(id));
+    this.operations.set(id, { subtype: preset.subtype, promise });
+    return promise;
+  }
+
+  async performBrew(accessory, id, preset) {
+    let submitted = false;
+    try {
+      this.log.info('Requesting ' + preset.name + ' on ' + accessory.displayName);
+      await this.cloud.startBrew(id, preset, async state => {
+        if (state.pod === 'UNKNOWN') {
+          this.log.info(preset.name + ': pod recognition is unavailable. Brewer reports ready.');
+        }
+        accessory.context.nextBrew = Date.now() + 60000;
+        accessory.context.lastBrewRejected = false;
+        accessory.context.lastBrewAccepted = false;
+        accessory.context.lastBrewPreset = preset.subtype;
+        this.api.updatePlatformAccessories([accessory]);
+        submitted = true;
+      });
+      accessory.context.lastBrewAccepted = true;
+      accessory.context.lastBrewAcceptedAt = Date.now();
+      this.api.updatePlatformAccessories([accessory]);
+      this.log.info(preset.name + ': request accepted. Checking brewer state...');
+      // Confirm in the background so HomeKit can acknowledge the momentary switch promptly.
+      this.cloud.confirmBrew(id)
+        .then(() => this.log.info(preset.name + ': brewer confirmed brewing.'))
+        .catch(err => this.log.warn(preset.name + ': ' + err.message));
+    } catch (err) {
+      if (submitted && [400, 422].includes(err.status)) {
+        // Keep a short debounce for repeated writes after a definite rejection.
+        accessory.context.nextBrew = Date.now() + 2000;
+        accessory.context.lastBrewRejected = true;
+        this.api.updatePlatformAccessories([accessory]);
+      }
+      throw err;
     }
   }
 

@@ -1,6 +1,6 @@
 # Homebridge for Keurig SMART
 
-Experimental Homebridge platform for Keurig SMART brewers, including the K-Café SMART. It exposes a named Power switch and polls reported state every minute. A K-Café SMART user has verified sign-in, discovery, and power control. Brew presets still need live verification.
+Experimental Homebridge platform for Keurig SMART brewers, including the K-Café SMART. It exposes a named Power switch and polls reported state every minute. A K-Café SMART K27 user has verified sign-in, discovery, power control, and a 2 oz shot. Other brew presets still need live verification.
 
 With **Expose coffee sizes, Over Ice and Cancel Brew** enabled, the plugin adds momentary switches for **Brew 4 / 6 / 8 / 10 / 12 oz Coffee**, **Brew Over Ice 6 oz**, and **Cancel Brew**. Coffee size presets use the configured temperature and strength (Hot and Balanced by default). Keurig app favorites appear as **Brew [favorite name]** and use each favorite's saved size, temperature and strength. Create favorites in the Keurig app for additional combinations. Favorites refresh every minute.
 
@@ -8,13 +8,15 @@ Optional settings expose **BrewID** recommended recipes for each size and **Hot 
 
 Version **0.2.3** selects the brew protocol by discovered model. K27/K27C and K28/K28C/K28B use recipe format **2.0**, with numbered size, temperature, strength and brew-type values. K29/K29C retain the older ounce, Fahrenheit and flow-rate format. Unknown models retain power control but cannot brew until their recipe format is verified. Version 2.0 favorites use their nested saved recipe and are filtered by brewer model when the app supplies it.
 
-The K27 format was verified against the official Android app **2.2622.0** and its public **applianceCapabilities** configuration on **2026-11-19**. For example, a custom 6 oz Hot/Balanced coffee uses size **3**, temperature **3**, strength **1** and brew type **13**. A size code is never an ounce measurement. The app still calls the command **brew** and includes **recipe_format_version: "2.0"**. This corrects a confirmed mismatch in earlier plugin requests, but live brewing still needs acceptance testing.
+The K27 format was verified against the official Android app **2.2622.0** and its public **applianceCapabilities** configuration on **2026-11-19**. For example, a custom 6 oz Hot/Balanced coffee uses size **3**, temperature **3**, strength **1** and brew type **13**. A size code is never an ounce measurement. The app still calls the command **brew** and includes **recipe_format_version: "2.0"**. This corrects a confirmed mismatch in earlier plugin requests. A user subsequently confirmed a successful 2 oz shot with version 0.2.3.
 
 The existing 8 oz service is retained when upgrading, with its name set to Brew 8 oz Coffee. Apple Home may retain a user-assigned label. Within the accessory settings, choose **Show as Separate Tiles** if you want each switch displayed individually.
 
 Brew actions check the machine's ready state and its reported locks and errors. Coffee requires a loaded pod when Keurig reports occupancy. Some K-Café SMART responses have a null pod-recognition field even with a pod loaded. The plugin displays that as UNKNOWN and permits a coffee request when the brewer reports BREW_READY with no lock or error, following the community client's behavior. An explicit EMPTY reading blocks coffee. Hot water requires an explicit EMPTY reading.
 
 A request wakes a sleeping brewer and briefly waits for readiness. If preparation or warming takes longer, power the brewer on, prepare it, and try the brew preset again. A shared 60-second guard prevents another preset from duplicating a recent request. Logs distinguish requests accepted by the API from brewing observed afterward and include the machine's brew, pod, lock and error states when preparation fails.
+
+Version **0.2.4** handles repeated HomeKit/UI switch writes from one tap. Writes to the same preset share an in-flight request and its result. Repeats within two seconds after API acceptance are acknowledged quietly without sending another command. Genuine failures still propagate, and later taps or another preset remain subject to the shared guard. Repeated blocked writes log one **ignored** warning per preset and guard instead of repeated brew-failure messages.
 
 API rejections include Keurig's **errors[].description** and returned validation messages with credentials and identifiers redacted. An explicit HTTP 400 or 422 brew rejection uses a two-second debounce instead of the 60-second guard. Accepted requests and ambiguous failures such as timeouts retain the longer guard.
 
@@ -56,11 +58,11 @@ Then follow the sign-in steps below, starting with step 3. Use a Keurig child br
 
 These commands assume the official Homebridge Docker image with persistent storage mounted at **/homebridge**, as documented in the [Docker image setup](https://github.com/homebridge/docker-homebridge). Substitute the configured storage path for another image.
 
-1. Copy **homebridge-keurig-0.2.3.tgz** from this project to the NAS folder mapped to **/homebridge** in your container. Use your NAS file manager or network share.
+1. Copy **homebridge-keurig-0.2.4.tgz** from this project to the NAS folder mapped to **/homebridge** in your container. Use your NAS file manager or network share.
 2. Open Homebridge UI on the other computer and choose **Terminal**. Confirm **/homebridge/config.json** exists, then install:
 
 ~~~sh
-npm --prefix /homebridge install /homebridge/homebridge-keurig-0.2.3.tgz
+npm --prefix /homebridge install /homebridge/homebridge-keurig-0.2.4.tgz
 ~~~
 
 3. Run sign-in in that terminal:
@@ -90,10 +92,10 @@ npm test
 npm pack
 ~~~
 
-Copy **homebridge-keurig-0.2.3.tgz** to the Homebridge host. From the folder containing that file, a standard Linux hb-service installation can install it with:
+Copy **homebridge-keurig-0.2.4.tgz** to the Homebridge host. From the folder containing that file, a standard Linux hb-service installation can install it with:
 
 ~~~sh
-npm --prefix /var/lib/homebridge install ./homebridge-keurig-0.2.3.tgz
+npm --prefix /var/lib/homebridge install ./homebridge-keurig-0.2.4.tgz
 ~~~
 
 Use the service user's normal permissions. Docker and NAS installations should run the install inside the Homebridge container and use its plugin and storage paths. Windows installations should use their configured plugin directory.
@@ -126,7 +128,7 @@ For a one-off HTTP 400 investigation, the development source includes a diagnost
 npm exec --yes --package=github:dean1d/homebridge-keurig#main -- homebridge-keurig-diagnose /var/lib/homebridge --brew 4
 ~~~
 
-The plugin has no runtime npm dependencies. npm test uses simulated Keurig responses. The package has been loaded against Homebridge 2.0.2 locally. Brew confirmation remains part of your acceptance test.
+The plugin has no runtime npm dependencies. npm test uses simulated Keurig responses. The package has been loaded against Homebridge 2.0.2 locally. Brew confirmation remains part of acceptance testing for each preset.
 
 Source and issue reports belong at [dean1d/homebridge-keurig](https://github.com/dean1d/homebridge-keurig). The plugin is MIT licensed. The first npm release is experimental and still needs a live account and brewer acceptance test.
 
