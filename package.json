@@ -4,13 +4,36 @@
   "description": "Homebridge controls for Keurig SMART brewers using browser sign-in",
   "license": "MIT",
   "author": "dean1d",
-  "repository": { "type": "git", "url": "git+https://github.com/dean1d/homebridge-keurig.git" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dean1d/homebridge-keurig.git"
+  },
   "homepage": "https://github.com/dean1d/homebridge-keurig#readme",
-  "bugs": { "url": "https://github.com/dean1d/homebridge-keurig/issues" },
+  "bugs": {
+    "url": "https://github.com/dean1d/homebridge-keurig/issues"
+  },
   "main": "index.js",
-  "bin": { "homebridge-keurig-login": "./login.js" },
-  "keywords": ["homebridge-plugin"],
-  "engines": { "node": ">=22.12.0", "homebridge": "^1.8.0 || ^2.0.0" },
-  "scripts": { "login": "node login.js", "test": "node --test test/*.test.js", "prepublishOnly": "npm test" },
-  "files": ["index.js", "cloud.js", "settings.js", "login.js", "config.schema.json", "README.md"]
+  "bin": {
+    "homebridge-keurig-login": "login.js"
+  },
+  "keywords": [
+    "homebridge-plugin"
+  ],
+  "engines": {
+    "node": ">=22.12.0",
+    "homebridge": "^1.8.0 || ^2.0.0"
+  },
+  "scripts": {
+    "login": "node login.js",
+    "test": "node --test test/*.test.js",
+    "prepublishOnly": "npm test"
+  },
+  "files": [
+    "index.js",
+    "cloud.js",
+    "settings.js",
+    "login.js",
+    "config.schema.json",
+    "README.md"
+  ]
 }
