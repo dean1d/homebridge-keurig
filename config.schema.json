@@ -1,0 +1,14 @@
+{
+  "pluginAlias": "KeurigSmart",
+  "pluginType": "platform",
+  "singular": true,
+  "schema": {
+    "type": "object",
+    "properties": {
+      "name": { "type": "string", "default": "Keurig" },
+      "clientId": { "title": "OAuth client ID override (optional)", "type": "string" },
+      "subscriptionKey": { "title": "API subscription key override (optional)", "type": "string", "format": "password" },
+      "enableBrew": { "title": "Expose an 8 oz Brew Coffee switch", "type": "boolean", "default": false }
+    }
+  }
+}
