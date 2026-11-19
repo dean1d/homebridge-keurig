@@ -8,7 +8,14 @@
       "name": { "type": "string", "default": "Keurig" },
       "clientId": { "title": "OAuth client ID override (optional)", "type": "string" },
       "subscriptionKey": { "title": "API subscription key override (optional)", "type": "string", "format": "password" },
-      "enableBrew": { "title": "Expose an 8 oz Brew Coffee switch", "type": "boolean", "default": false }
+      "enableBrew": { "title": "Expose coffee sizes, Over Ice and Cancel Brew", "type": "boolean", "default": false },
+      "brewTemperature": { "title": "Coffee and hot water temperature", "type": "string", "default": "Hot",
+        "enum": ["Warm", "Warmer", "Hot", "Hotter", "Extra Hot", "Max Hot"] },
+      "brewStrength": { "title": "Coffee strength", "type": "string", "default": "Balanced",
+        "enum": ["Balanced", "Rich", "Robust", "Strong", "Intense"] },
+      "enableFavorites": { "title": "Expose Keurig app favorites", "type": "boolean", "default": true },
+      "enableRecommended": { "title": "Expose BrewID sizes", "type": "boolean", "default": false },
+      "enableHotWater": { "title": "Expose hot water sizes", "type": "boolean", "default": false }
     }
   }
 }

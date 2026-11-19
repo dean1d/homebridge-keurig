@@ -4,9 +4,46 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const defaults = require('./settings');
+const { setTimeout: sleep } = require('node:timers/promises');
+
+const sizes = [4, 6, 8, 10, 12];
+const temperatures = { Warm: 187, Warmer: 191, Hot: 194, Hotter: 197, 'Extra Hot': 200, 'Max Hot': 204 };
+const strengths = { Balanced: 4435, Rich: 3942, Robust: 3449, Strong: 2957, Intense: 2464 };
+
+function validateRecipe(recipe) {
+  if (!sizes.includes(recipe.size) || !Number.isFinite(recipe.temp) || recipe.temp < 150 || recipe.temp > 212 ||
+      !Number.isFinite(recipe.flow_rate) || recipe.flow_rate <= 0 || recipe.flow_rate > 10000) {
+    throw new Error('This brew recipe has unsupported size, temperature or strength settings.');
+  }
+  return recipe;
+}
+
+function describeState(state) {
+  return 'power=' + state.appliance + ', brewer=' + state.brewer + ', pod=' + state.pod +
+    ', lock=' + (state.lock || 'none') + ', error=' + (state.error || 'none');
+}
 
 const issuer = 'https://login.keurig.com';
 const base = 'https://iot.keurig.com/connected-platform/';
+
+function storageError(error, operation, directory) {
+  if (['EACCES', 'EPERM', 'EROFS'].includes(error.code)) {
+    return new Error('Keurig storage permission error (' + error.code + ') while ' + operation +
+      ' in ' + path.resolve(directory) + '. Run the helper as the Homebridge service user and verify that user can read and write this storage directory.');
+  }
+  return error;
+}
+
+async function checkStorage(directory) {
+  const probe = path.join(directory, '.keurig-write-check-' + randomUUID());
+  try {
+    await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+    await fs.writeFile(probe, '', { flag: 'wx', mode: 0o600 });
+    await fs.rm(probe);
+  } catch (error) {
+    throw storageError(error, 'checking write access', directory);
+  }
+}
 
 async function exchange(fields) {
   const response = await fetch(issuer + '/oauth/token', {
@@ -35,8 +72,11 @@ async function saveSession(directory, clientId, tokens, previousRefresh) {
   try {
     await fs.writeFile(temp, JSON.stringify(session), { flag: 'wx', mode: 0o600 });
     await fs.rename(temp, file);
+  } catch (error) {
+    throw storageError(error, 'saving keurig-session.json', directory);
   } finally {
-    await fs.rm(temp, { force: true });
+    // Preserve the save failure if cleanup is also denied.
+    await fs.rm(temp, { force: true }).catch(() => {});
   }
   return session;
 }
@@ -61,7 +101,7 @@ class KeurigCloud {
       session = JSON.parse(await fs.readFile(path.join(this.directory, 'keurig-session.json'), 'utf8'));
     } catch (error) {
       if (error.code === 'ENOENT') throw new Error('Keurig sign-in required. Run npm run login for this Homebridge storage folder.');
-      throw error;
+      throw storageError(error, 'reading keurig-session.json', this.directory);
     }
     if (session.clientId !== this.config.clientId) throw new Error('OAuth client changed. Sign in again.');
     if (session.access && session.expires > Date.now() + 60000) return session.access;
@@ -97,12 +137,80 @@ class KeurigCloud {
     const value = name => properties.find(p => p.name === name)?.value;
     const power = value('appl_state')?.current;
     if (!['IDLE', 'BREW', 'STANDBY'].includes(power)) throw new Error('Brewer power state is unavailable.');
-    const brew = value('brew_state');
+    const brew = value('brew_state') || {};
+    const pod = value('lid_recog_result') || {};
     return {
       on: power !== 'STANDBY',
-      ready: power === 'IDLE' && brew?.current === 'BREW_READY' && !brew.error && !brew.lock_cause &&
-        value('lid_recog_result')?.pm_content === 'POD',
+      ready: power !== 'STANDBY' && brew.current === 'BREW_READY' && !brew.error && !brew.lock_cause,
+      appliance: power, brewer: brew.current, pod: pod.pm_content,
+      lock: brew.lock_cause, error: brew.error, recipes: pod.pod_details?.recipes || [],
     };
+  }
+
+  async favorites() {
+    const favorites = await this.request('api/usdm/v1/presets');
+    if (!Array.isArray(favorites)) throw new Error('Unexpected Keurig favorites response.');
+    return favorites.filter(favorite => favorite && typeof favorite.id === 'string' && favorite.id);
+  }
+
+  async waitForState(id, predicate, attempts = 10, delay = 1500) {
+    let state;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      await sleep(delay);
+      state = await this.state(id);
+      if (predicate(state)) return state;
+    }
+    throw new Error('Brewer did not reach the expected state (' + describeState(state) + ').');
+  }
+
+  async startBrew(id, preset, submitted) {
+    let state = await this.state(id);
+    if (!state.on) {
+      await this.command(id, 'idle');
+      state = await this.waitForState(id, current => current.on && current.ready, 3, 1000);
+    }
+    if (!state.ready) throw new Error('Brewer is not ready (' + describeState(state) + ').');
+    if (preset.mode === 'water') {
+      if (state.pod !== 'EMPTY') throw new Error('Remove the pod for hot water (' + describeState(state) + ').');
+    } else if (!state.pod || state.pod === 'EMPTY') {
+      throw new Error('Load a pod and lower the handle (' + describeState(state) + ').');
+    }
+    let params = { size: preset.size, temp: temperatures[preset.temperature || 'Hot'],
+      flow_rate: strengths[preset.strength || 'Balanced'], brew_type: 'NORMAL',
+      enhanced: true, category: 'CUSTOM' };
+    switch (preset.mode) {
+      case 'water':
+        params = { ...params, brew_type: 'HOT_WATER', category: 'WATER', flow_rate: strengths.Balanced };
+        break;
+      case 'iced':
+        params = { ...params, size: 6, temp: 201, flow_rate: strengths.Intense, brew_type: 'ICED', category: 'ICED' };
+        break;
+      case 'recommended': {
+        const recipe = state.recipes.find(recipe => recipe.size === preset.size);
+        if (!recipe) throw new Error('BrewID has no recommended recipe for ' + preset.size + ' oz.');
+        params = { ...params, temp: recipe.temp, flow_rate: recipe.flow_rate, category: 'MASTER' };
+        break;
+      }
+      case 'favorite': {
+        const favorite = (await this.favorites()).find(favorite => favorite.id === preset.favoriteId);
+        if (!favorite) throw new Error('This favorite was removed from the Keurig app.');
+        params = { ...params, size: favorite.size, temp: favorite.temperature,
+          flow_rate: favorite.flowRate, category: 'FAVORITE' };
+        break;
+      }
+    }
+    validateRecipe(params);
+    await submitted();
+    await this.command(id, 'brew', params);
+  }
+
+  async confirmBrew(id) {
+    try {
+      return await this.waitForState(id, current =>
+        current.appliance === 'BREW' || ['BREW_IN_PROGRESS', 'BREW_SUCCESSFUL'].includes(current.brewer));
+    } catch (err) {
+      throw new Error('Brew request sent, but the start could not be confirmed. Check the brewer before retrying. ' + err.message);
+    }
   }
 
   command(id, command_name, params) {
@@ -110,4 +218,4 @@ class KeurigCloud {
   }
 }
 
-module.exports = { KeurigCloud, exchange, saveSession, issuer };
+module.exports = { KeurigCloud, exchange, saveSession, issuer, checkStorage, storageError, sizes, temperatures, strengths };

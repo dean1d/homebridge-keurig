@@ -5,7 +5,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const readline = require('node:readline/promises');
-const { exchange, saveSession, issuer, KeurigCloud } = require('./cloud');
+const { exchange, saveSession, issuer, KeurigCloud, checkStorage, storageError } = require('./cloud');
 const defaults = require('./settings');
 
 const redirect = defaults.redirect;
@@ -44,6 +44,8 @@ async function inspect(cloud) {
     const state = await cloud.state(device.id);
     console.log('Found ' + (device.registration?.name || 'Keurig') + ' | model ' + device.model +
       ' | power ' + (state.on ? 'on' : 'off') + ' | ready to brew ' + state.ready);
+    console.log('Brewer state ' + state.brewer + ' | pod ' + state.pod +
+      ' | lock ' + (state.lock || 'none') + ' | error ' + (state.error || 'none'));
   }
 }
 
@@ -54,7 +56,7 @@ async function login(directory, checkOnly = false) {
     const config = JSON.parse(await fs.readFile(path.join(directory, 'config.json'), 'utf8'));
     platform = config.platforms?.find(p => p.platform === 'KeurigSmart') || {};
   } catch (err) {
-    if (err.code !== 'ENOENT') throw err;
+    if (err.code !== 'ENOENT') throw storageError(err, 'reading config.json', directory);
   }
   const cloud = new KeurigCloud(directory, platform);
   if (checkOnly) {
@@ -62,6 +64,8 @@ async function login(directory, checkOnly = false) {
     return;
   }
   if (!process.stdin.isTTY) throw new Error('Run this command in an interactive terminal.');
+  // Fail before the user signs in if the session cannot be saved.
+  await checkStorage(directory);
   const flow = authorization(cloud.config.clientId);
   console.log('Open browser developer tools, select Network, and enable Preserve log.');
   console.log('Open this link in that browser and sign in to Keurig:\n' + flow.url.href);
@@ -75,9 +79,10 @@ async function login(directory, checkOnly = false) {
   } finally {
     terminal.close();
   }
+  console.log('Exchanging the authorization code with Keurig...');
   const tokens = await exchange({ grant_type: 'authorization_code', client_id: cloud.config.clientId,
     redirect_uri: redirect, code_verifier: flow.verifier, code });
-  await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+  console.log('Saving the Keurig session...');
   await saveSession(directory, cloud.config.clientId, tokens);
   console.log('Sign-in saved. Checking registered brewers...');
   await inspect(cloud);

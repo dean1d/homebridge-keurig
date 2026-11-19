@@ -1,6 +1,6 @@
 'use strict';
 
-const { KeurigCloud } = require('./cloud');
+const { KeurigCloud, sizes } = require('./cloud');
 
 const plugin = 'homebridge-keurig';
 const platform = 'KeurigSmart';
@@ -11,8 +11,10 @@ class KeurigPlatform {
     this.config = config;
     this.api = api;
     this.accessories = new Map();
+    this.operations = new Set();
     this.cloud = new KeurigCloud(api.user.storagePath(), config);
     api.on('didFinishLaunching', () => {
+      log.info('Starting Keurig platform. Session storage: ' + api.user.storagePath());
       this.poll();
     });
     api.on('shutdown', () => { this.stopped = true; clearTimeout(this.timer); });
@@ -26,40 +28,107 @@ class KeurigPlatform {
   bind(accessory, id) {
     const { Service, Characteristic } = this.api.hap;
     const power = accessory.getServiceById(Service.Switch, 'power') ||
-      accessory.addService(Service.Switch, accessory.displayName, 'power');
+      accessory.addService(Service.Switch, 'Power', 'power');
+    this.nameService(power, 'Power');
     power.getCharacteristic(Characteristic.On)
       .onGet(async () => (await this.cloud.state(id)).on)
-      .onSet(async on => { await this.cloud.command(id, on ? 'idle' : 'standby'); });
+      .onSet(async on => {
+        try { await this.cloud.command(id, on ? 'idle' : 'standby'); }
+        catch (err) {
+          this.log.warn('Power failed: ' + err.message);
+          throw new this.api.hap.HapStatusError(this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+        }
+      });
 
-    let brew = accessory.getServiceById(Service.Switch, 'brew');
-    if (!this.config.enableBrew) {
-      if (brew) accessory.removeService(brew);
-      return;
+    const presets = this.presets(accessory.context.favorites || []);
+    const wanted = new Set(['power', ...presets.map(preset => preset.subtype)]);
+    for (const service of [...accessory.services]) {
+      if (service.UUID === Service.Switch.UUID && !wanted.has(service.subtype)) accessory.removeService(service);
     }
-    brew ??= accessory.addService(Service.Switch, 'Brew Coffee', 'brew');
-    // Block duplicate writes during preflight, command submission and acceptance.
-    let pending = false;
-    let nextBrew = 0;
-    brew.getCharacteristic(Characteristic.On).onGet(() => false).onSet(async on => {
-      if (!on) return;
-      if (pending || Date.now() < nextBrew) throw new Error('A brew was recently requested.');
-      pending = true;
-      try {
-        if (!(await this.cloud.state(id)).ready) throw new Error('The brewer must be ready with a fresh pod loaded.');
-        nextBrew = Date.now() + 60000;
-        await this.cloud.command(id, 'brew', { size: 8, brew_type: 'NORMAL', flow_rate: 4435, temp: 194,
-          enhanced: true, category: 'CUSTOM' });
-      } finally {
-        pending = false;
-        setTimeout(() => brew.updateCharacteristic(Characteristic.On, false), 150).unref();
-      }
-    });
+    for (const preset of presets) {
+      const action = accessory.getServiceById(Service.Switch, preset.subtype) ||
+        accessory.addService(Service.Switch, preset.name, preset.subtype);
+      this.nameService(action, preset.name);
+      action.getCharacteristic(Characteristic.On).onGet(() => false).onSet(async on => {
+        if (!on) return;
+        try {
+          if (preset.mode === 'cancel') {
+            await this.cloud.command(id, 'cancel_brew');
+            this.log.info('Cancel brew requested.');
+            return;
+          }
+          if (this.operations.has(id) || Date.now() < (accessory.context.nextBrew || 0)) {
+            throw new Error('A brew was recently requested. Check the brewer before trying another preset.');
+          }
+          this.operations.add(id);
+          try {
+            this.log.info('Requesting ' + preset.name + ' on ' + accessory.displayName);
+            await this.cloud.startBrew(id, preset, async () => {
+              accessory.context.nextBrew = Date.now() + 60000;
+              this.api.updatePlatformAccessories([accessory]);
+            });
+            this.log.info(preset.name + ': request accepted. Checking brewer state...');
+            // Confirm in the background so HomeKit can acknowledge the momentary switch promptly.
+            this.cloud.confirmBrew(id)
+              .then(() => this.log.info(preset.name + ': brewer confirmed brewing.'))
+              .catch(err => this.log.warn(preset.name + ': ' + err.message));
+          } finally {
+            this.operations.delete(id);
+          }
+        } catch (err) {
+          this.log.warn(preset.name + ' failed: ' + err.message);
+          throw new this.api.hap.HapStatusError(this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+        } finally {
+          setTimeout(() => action.updateCharacteristic(Characteristic.On, false), 150).unref();
+        }
+      });
+    }
+  }
+
+  nameService(service, name) {
+    const { Characteristic } = this.api.hap;
+    service.displayName = name;
+    service.setCharacteristic(Characteristic.Name, name);
+    if (!service.testCharacteristic(Characteristic.ConfiguredName)) {
+      service.addOptionalCharacteristic(Characteristic.ConfiguredName);
+    }
+    service.setCharacteristic(Characteristic.ConfiguredName, name);
+  }
+
+  presets(favorites) {
+    if (!this.config.enableBrew) return [];
+    const temperature = this.config.brewTemperature || 'Hot';
+    const strength = this.config.brewStrength || 'Balanced';
+    const presets = sizes.map(size => ({
+      subtype: size === 8 ? 'brew' : 'coffee-' + size,
+      name: 'Brew ' + size + ' oz Coffee', size, mode: 'coffee', temperature, strength,
+    }));
+    presets.push({ subtype: 'iced', name: 'Brew Over Ice 6 oz', mode: 'iced' },
+      { subtype: 'cancel', name: 'Cancel Brew', mode: 'cancel' });
+    if (this.config.enableRecommended) {
+      presets.push(...sizes.map(size => ({ subtype: 'recommended-' + size,
+        name: 'BrewID ' + size + ' oz Coffee', size, mode: 'recommended' })));
+    }
+    if (this.config.enableHotWater) {
+      presets.push(...sizes.map(size => ({ subtype: 'water-' + size,
+        name: 'Dispense ' + size + ' oz Hot Water', size, mode: 'water', temperature })));
+    }
+    if (this.config.enableFavorites !== false) {
+      presets.push(...favorites.map(favorite => ({ subtype: 'favorite-' + favorite.id,
+        name: 'Brew ' + (favorite.name || 'Favorite'), mode: 'favorite', favoriteId: favorite.id })));
+    }
+    return presets;
   }
 
   async poll() {
     let failed = false;
     try {
       const devices = await this.cloud.devices();
+      let favorites;
+      if (this.config.enableBrew && this.config.enableFavorites !== false) {
+        try { favorites = (await this.cloud.favorites()).map(({ id, name }) => ({ id, name })); }
+        catch (err) { this.log.warn('Keurig favorites: ' + err.message); }
+      }
       const seen = new Set();
       for (const device of devices) {
         if (this.stopped) return;
@@ -74,9 +143,15 @@ class KeurigPlatform {
             .setCharacteristic(Characteristic.Manufacturer, 'Keurig')
             .setCharacteristic(Characteristic.Model, String(device.model || 'SMART'))
             .setCharacteristic(Characteristic.SerialNumber, String(device.serialNumber || device.id));
+          accessory.context.favorites = favorites || [];
           this.bind(accessory, device.id);
           this.api.registerPlatformAccessories(plugin, platform, [accessory]);
           this.accessories.set(uuid, accessory);
+          this.log.info('Discovered ' + accessory.displayName + '. Published Power and configured brew presets.');
+        } else if (favorites && JSON.stringify(favorites) !== JSON.stringify(accessory.context.favorites)) {
+          accessory.context.favorites = favorites;
+          this.bind(accessory, device.id);
+          this.api.updatePlatformAccessories([accessory]);
         }
         const { Service, Characteristic } = this.api.hap;
         const power = accessory.getServiceById(Service.Switch, 'power');
