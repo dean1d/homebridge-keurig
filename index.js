@@ -63,7 +63,10 @@ class KeurigPlatform {
           this.operations.add(id);
           try {
             this.log.info('Requesting ' + preset.name + ' on ' + accessory.displayName);
-            await this.cloud.startBrew(id, preset, async () => {
+            await this.cloud.startBrew(id, preset, async state => {
+              if (state.pod === 'UNKNOWN') {
+                this.log.info(preset.name + ': pod recognition is unavailable. Brewer reports ready.');
+              }
               accessory.context.nextBrew = Date.now() + 60000;
               this.api.updatePlatformAccessories([accessory]);
             });

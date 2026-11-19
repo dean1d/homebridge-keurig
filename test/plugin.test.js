@@ -130,6 +130,42 @@ test('brew refusal, missing recipes and wake-up failures send no brew command', 
   assert.deepEqual(commands, [['demo', 'idle']]);
 });
 
+test('K-Cafe null and missing recognition allow coffee only while the brewer is ready', async () => {
+  const cloud = new KeurigCloud('', {});
+  const properties = [
+    { name: 'appl_state', value: { current: 'IDLE' } },
+    { name: 'brew_state', value: { current: 'BREW_READY', lock_cause: null, error: null } },
+    { name: 'lid_recog_result', value: { pm_content: null } },
+  ];
+  const commands = [];
+  cloud.request = async (_route, payload) => {
+    if (payload) commands.push(payload);
+    else return properties;
+  };
+  for (const podValue of [null, undefined]) {
+    properties[2].value.pm_content = podValue;
+    const state = await cloud.state('demo');
+    assert.equal(state.pod, 'UNKNOWN');
+    assert.equal(state.ready, true);
+    await cloud.startBrew('demo', { mode: 'coffee', size: 6 }, async submittedState => {
+      assert.equal(submittedState.pod, 'UNKNOWN');
+    });
+    assert.equal(commands.at(-1).command_name, 'brew');
+    assert.equal(commands.at(-1).params.size, 6);
+    const count = commands.length;
+    await assert.rejects(cloud.startBrew('demo', { mode: 'water', size: 6 }, async () => {}), /Remove the pod/);
+    assert.equal(commands.length, count);
+  }
+  properties[1].value.current = 'BREW_LOCKED';
+  properties[1].value.lock_cause = 'PM_NOT_READY';
+  await assert.rejects(cloud.startBrew('demo', { mode: 'coffee', size: 6 }, async () => {}), /PM_NOT_READY/);
+  properties[1].value.current = 'BREW_READY';
+  properties[1].value.lock_cause = null;
+  properties[1].value.error = 'ADD_WATER';
+  await assert.rejects(cloud.startBrew('demo', { mode: 'coffee', size: 6 }, async () => {}), /ADD_WATER/);
+  assert.equal(commands.length, 2);
+});
+
 test('confirmation never retries a brew command', async () => {
   const cloud = new KeurigCloud('', {});
   let commands = 0;

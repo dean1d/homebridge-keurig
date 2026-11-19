@@ -142,7 +142,7 @@ class KeurigCloud {
     return {
       on: power !== 'STANDBY',
       ready: power !== 'STANDBY' && brew.current === 'BREW_READY' && !brew.error && !brew.lock_cause,
-      appliance: power, brewer: brew.current, pod: pod.pm_content,
+      appliance: power, brewer: brew.current, pod: pod.pm_content ?? 'UNKNOWN',
       lock: brew.lock_cause, error: brew.error, recipes: pod.pod_details?.recipes || [],
     };
   }
@@ -172,7 +172,7 @@ class KeurigCloud {
     if (!state.ready) throw new Error('Brewer is not ready (' + describeState(state) + ').');
     if (preset.mode === 'water') {
       if (state.pod !== 'EMPTY') throw new Error('Remove the pod for hot water (' + describeState(state) + ').');
-    } else if (!state.pod || state.pod === 'EMPTY') {
+    } else if (state.pod === 'EMPTY') {
       throw new Error('Load a pod and lower the handle (' + describeState(state) + ').');
     }
     let params = { size: preset.size, temp: temperatures[preset.temperature || 'Hot'],
@@ -200,7 +200,7 @@ class KeurigCloud {
       }
     }
     validateRecipe(params);
-    await submitted();
+    await submitted(state);
     await this.command(id, 'brew', params);
   }
 
