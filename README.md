@@ -86,3 +86,30 @@ npm pack
 The cloud client, controls catalog, Matter publisher, and Homebridge settings UI live in separate modules. Tests use simulated Keurig responses.
 
 See [CHANGELOG.md](CHANGELOG.md) for release notes.
+
+## Credits
+
+- [AdamSand10](https://github.com/AdamSand10) for the [Home Assistant Keurig integration](https://github.com/AdamSand10/homeassistant-keurig), which served as a reference for communicating with the brewer.
+- [arketec](https://github.com/arketec) for the [OAuth contribution](https://github.com/AdamSand10/homeassistant-keurig/pull/1) that informed this plugin's browser sign-in.
+
+## Disclaimer
+
+- This independent project is not affiliated with, endorsed by, or supported by Keurig or Keurig Dr Pepper.
+- The plugin uses an undocumented Keurig cloud interface that can change without notice.
+- Remote brewing dispenses hot liquid. Use a suitable cup, prepare the brewer before starting a brew, and follow Keurig's operating instructions.
+
+## Support & Donations
+
+This plugin is free and open source. If it saved you some time or frustration and you'd like to say thanks, any support is greatly appreciated!
+
+<a href="https://buymeacoffee.com/dean1d" target="_blank">
+  <img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-dean1d-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me a Coffee" />
+</a>
+
+<a href="https://cash.app/$dkoenigBOA" target="_blank">
+  <img src="https://img.shields.io/badge/Cash%20App-%24dkoenigBOA-00C244?style=for-the-badge&logo=cash-app&logoColor=white" alt="Cash App" />
+</a>
+
+<a href="https://venmo.com/u/Dean1d" target="_blank">
+  <img src="https://img.shields.io/badge/Venmo-Dean1d-3D95CE?style=for-the-badge&logo=venmo&logoColor=white" alt="Venmo" />
+</a>
