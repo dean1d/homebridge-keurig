@@ -17,6 +17,8 @@ Control a Keurig SMART brewer from HomeKit and Matter. Connect your Keurig accou
 
 ## Installation and setup
 
+If your brewer has an accented **é** in its default name, rename it in the Keurig app before Homebridge discovers it. For example, change **K-Café SMART** to **K-Cafe SMART**. If you already added the brewer to a controller, you can rename its existing tile there.
+
 1. Search for **homebridge-keurig** in Homebridge's **Plugins** page and install it.
 2. Open **Settings** on the Keurig plugin card. If you already signed in, choose **Check connection & refresh favorites**. Otherwise, choose **Start sign-in** and follow the browser steps. Paste the Keurig callback URL into plugin settings and keep it private.
 3. Check the controls you want. Options reflect your brewer model and include individual Keurig app favorites.
