@@ -28,7 +28,9 @@ function validateV2Recipe(recipe, model) {
       ![1, 2, 5, 6, 7, 11, 12, 13, 17].includes(recipe.brew_type) ||
       (recipe.brew_type === 6
         ? ![1, 2].includes(recipe.size) || recipe.strength !== 0 || recipe.temperature !== 0
-        : ![1, 2, 3, 4, 5].includes(recipe.strength) || ![2, 3, 4, 5, 6, 7, 8].includes(recipe.temperature))) {
+        : recipe.brew_type === 17
+          ? ![4, 5, 6].includes(recipe.size) || recipe.strength !== undefined || recipe.temperature !== undefined
+          : ![1, 2, 3, 4, 5].includes(recipe.strength) || ![2, 3, 4, 5, 6, 7, 8].includes(recipe.temperature))) {
     throw new Error('This brew recipe has unsupported size, temperature or strength settings for ' + model + '.');
   }
   return recipe;
@@ -200,10 +202,15 @@ class KeurigCloud {
     if (!['IDLE', 'BREW', 'STANDBY'].includes(power)) throw new Error('Brewer power state is unavailable.');
     const brew = value('brew_state') || {};
     const pod = value('lid_recog_result') || {};
+    // K27/K28 recognition uses guid (or guid.id), not the legacy pm_content field.
+    // These are the two empty-holder/hot-water identifiers used by the mobile app.
+    const podId = typeof pod.guid === 'object' ? pod.guid?.id : pod.guid;
+    const occupancy = pod.pm_content ?? (typeof podId === 'string' && podId
+      ? (['900-000', '900-0000'].includes(podId) ? 'EMPTY' : 'POD') : 'UNKNOWN');
     return {
       on: power !== 'STANDBY',
       ready: power !== 'STANDBY' && brew.current === 'BREW_READY' && !brew.error && !brew.lock_cause,
-      appliance: power, brewer: brew.current, pod: pod.pm_content ?? 'UNKNOWN',
+      appliance: power, brewer: brew.current, pod: occupancy,
       lock: brew.lock_cause, error: brew.error, recipes: pod.pod_details?.recipes || [],
     };
   }
@@ -263,6 +270,9 @@ class KeurigCloud {
         break;
       case 'iced':
         params = { ...params, size: 3, temperature: 2, strength: 5, brew_type: 5 };
+        break;
+      case 'iced-enhanced':
+        params = { recipe_format_version: '2.0', size: preset.size / 2, brew_type: 17 };
         break;
       case 'recommended': {
         const recipe = state.recipes.find(recipe => recipe.size === params.size);

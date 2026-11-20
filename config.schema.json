@@ -5,17 +5,114 @@
   "schema": {
     "type": "object",
     "properties": {
-      "name": { "type": "string", "default": "Keurig" },
-      "clientId": { "title": "OAuth client ID override (optional)", "type": "string" },
-      "subscriptionKey": { "title": "API subscription key override (optional)", "type": "string", "format": "password" },
-      "enableBrew": { "title": "Expose coffee sizes, Over Ice and Cancel Brew", "type": "boolean", "default": false },
-      "brewTemperature": { "title": "Coffee and hot water temperature", "type": "string", "default": "Hot",
-        "enum": ["Warm", "Warmer", "Hot", "Hotter", "Extra Hot", "Max Hot"] },
-      "brewStrength": { "title": "Coffee strength", "type": "string", "default": "Balanced",
-        "enum": ["Balanced", "Rich", "Robust", "Strong", "Intense"] },
-      "enableFavorites": { "title": "Expose Keurig app favorites", "type": "boolean", "default": true },
-      "enableRecommended": { "title": "Expose BrewID sizes", "type": "boolean", "default": false },
-      "enableHotWater": { "title": "Expose hot water sizes", "type": "boolean", "default": false }
+      "name": {
+        "type": "string",
+        "default": "Keurig"
+      },
+      "clientId": {
+        "title": "OAuth client ID override (optional)",
+        "type": "string"
+      },
+      "subscriptionKey": {
+        "title": "API subscription key override (optional)",
+        "type": "string",
+        "format": "password"
+      },
+      "enableBrew": {
+        "title": "Expose coffee sizes, Over Ice and Cancel Brew",
+        "type": "boolean",
+        "default": false
+      },
+      "brewTemperature": {
+        "title": "Coffee and hot water temperature",
+        "type": "string",
+        "default": "Hot",
+        "enum": [
+          "Warm",
+          "Warmer",
+          "Hot",
+          "Hotter",
+          "Extra Hot",
+          "Max Hot"
+        ]
+      },
+      "brewStrength": {
+        "title": "Coffee strength",
+        "type": "string",
+        "default": "Balanced",
+        "enum": [
+          "Balanced",
+          "Rich",
+          "Robust",
+          "Strong",
+          "Intense"
+        ]
+      },
+      "enableFavorites": {
+        "title": "Expose Keurig app favorites",
+        "type": "boolean",
+        "default": true
+      },
+      "enableRecommended": {
+        "title": "Expose BrewID sizes",
+        "type": "boolean",
+        "default": false
+      },
+      "enableHotWater": {
+        "title": "Expose hot water sizes",
+        "type": "boolean",
+        "default": false
+      },
+      "enableHomeKit": {
+        "title": "Publish HomeKit controls",
+        "type": "boolean",
+        "default": true
+      },
+      "enableMatter": {
+        "title": "Publish Matter controls",
+        "description": "Also enable Matter in the Keurig child bridge settings. Requires Homebridge 2.5 or later.",
+        "type": "boolean",
+        "default": true
+      },
+      "controls": {
+        "title": "Selected controls",
+        "description": "Managed by the model-aware control checkboxes above.",
+        "type": "object",
+        "additionalProperties": {
+          "type": "boolean"
+        }
+      }
     }
-  }
+  },
+  "customUi": true,
+  "headerDisplay": "Connect a Keurig SMART brewer and choose the controls shown in HomeKit and Matter.",
+  "layout": [
+    {
+      "type": "fieldset",
+      "title": "Publication",
+      "items": [
+        "name",
+        "enableHomeKit",
+        "enableMatter"
+      ]
+    },
+    {
+      "type": "fieldset",
+      "title": "Coffee defaults",
+      "items": [
+        "brewTemperature",
+        "brewStrength"
+      ]
+    },
+    {
+      "type": "fieldset",
+      "title": "Advanced account settings",
+      "expandable": true,
+      "expanded": false,
+      "items": [
+        "clientId",
+        "subscriptionKey"
+      ]
+    }
+  ]
 }

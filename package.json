@@ -1,7 +1,7 @@
 {
   "name": "homebridge-keurig",
-  "version": "0.2.5",
-  "description": "Homebridge controls for Keurig SMART brewers using browser sign-in",
+  "version": "0.3.0",
+  "description": "Homebridge controls for Keurig SMART brewers with browser sign-in, selectable presets, HomeKit and Matter",
   "license": "MIT",
   "author": "dean1d",
   "repository": {
@@ -18,7 +18,12 @@
     "homebridge-keurig-diagnose": "diagnose.js"
   },
   "keywords": [
-    "homebridge-plugin"
+    "homebridge-plugin",
+    "supports-hap",
+    "supports-matter",
+    "keurig",
+    "coffee",
+    "matter"
   ],
   "engines": {
     "node": ">=22.12.0",
@@ -36,6 +41,29 @@
     "login.js",
     "diagnose.js",
     "config.schema.json",
-    "README.md"
+    "README.md",
+    "controls.js",
+    "matter.js",
+    "homebridge-ui",
+    "assets",
+    "CHANGELOG.md"
+  ],
+  "dependencies": {
+    "@homebridge/plugin-ui-utils": "^2.3.0"
+  },
+  "displayName": "Keurig SMART",
+  "funding": [
+    {
+      "type": "buymeacoffee",
+      "url": "https://buymeacoffee.com/dean1d"
+    },
+    {
+      "type": "other",
+      "url": "https://cash.app/$dkoenigBOA"
+    },
+    {
+      "type": "other",
+      "url": "https://venmo.com/u/Dean1d"
+    }
   ]
 }

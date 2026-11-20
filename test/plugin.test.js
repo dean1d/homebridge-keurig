@@ -184,6 +184,32 @@ test('confirmation never retries a brew command', async () => {
   assert.equal(commands, 0);
 });
 
+test('K27 guid recognition identifies empty holders for hot water and blocks loaded pods', async () => {
+  const cloud = new KeurigCloud('', {});
+  cloud.models.set('cafe', 'K27');
+  const properties = [
+    { name: 'appl_state', value: { current: 'IDLE' } },
+    { name: 'brew_state', value: { current: 'BREW_READY', lock_cause: '', error: '' } },
+    { name: 'lid_recog_result', value: { pm_content: null, guid: '900-000' } },
+  ];
+  const commands = [];
+  cloud.request = async (_route, payload) => { if (payload) commands.push(payload); else return properties; };
+  for (const guid of ['900-000', '900-0000', { id: '900-000' }, { id: '900-0000' }]) {
+    properties[2].value.guid = guid;
+    assert.equal((await cloud.state('cafe')).pod, 'EMPTY');
+    await cloud.startBrew('cafe', { mode: 'water', size: 6 }, async () => {});
+    assert.equal(commands.at(-1).params.brew_type, 1);
+    await assert.rejects(cloud.startBrew('cafe', { mode: 'coffee', size: 6 }, async () => {}), /Load a pod/);
+  }
+  const count = commands.length;
+  for (const guid of ['coffee-pod', { id: 'coffee-pod' }]) {
+    properties[2].value.guid = guid;
+    assert.equal((await cloud.state('cafe')).pod, 'POD');
+    await assert.rejects(cloud.startBrew('cafe', { mode: 'water', size: 6 }, async () => {}), /Remove the pod/);
+  }
+  assert.equal(commands.length, count);
+});
+
 test('K27 discovery selects v2 enums and sends one custom brew without legacy units', async t => {
   const cloud = new KeurigCloud('', {});
   cloud.token = async () => 'example-token';
@@ -235,6 +261,9 @@ test('v2 sizes, temperatures, strengths, shots, iced, BrewID and saved favorites
   assert.equal(commands.at(-1)[2].brew_type, 5);
   assert.equal(commands.at(-1)[2].size, 3);
   assert.equal(commands.at(-1)[2].temperature, 2);
+  await cloud.startBrew('cafe', { mode: 'iced-enhanced', size: 10 }, submit);
+  assert.deepEqual(commands.at(-1)[2], { recipe_format_version: '2.0', size: 5, brew_type: 17,
+    extensions: { key1: 'value1' } });
   await cloud.startBrew('cafe', { mode: 'recommended', size: 8 }, submit);
   assert.equal(commands.at(-1)[2].brew_type, 11);
   assert.equal(commands.at(-1)[2].strength, 4);

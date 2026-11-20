@@ -1,137 +1,88 @@
-# Homebridge for Keurig SMART
+# homebridge-keurig
 
-Experimental Homebridge platform for Keurig SMART brewers, including the K-Café SMART. It exposes a named Power switch and polls reported state every minute. A K-Café SMART K27 user has verified sign-in, discovery, power control, and a 2 oz shot. Other brew presets still need live verification.
+[![npm version](https://img.shields.io/npm/v/homebridge-keurig)](https://www.npmjs.com/package/homebridge-keurig)
+[![npm weekly downloads](https://img.shields.io/npm/dw/homebridge-keurig)](https://www.npmjs.com/package/homebridge-keurig)
 
-With **Expose coffee sizes, Over Ice and Cancel Brew** enabled, the plugin adds momentary switches for **Brew 4 / 6 / 8 / 10 / 12 oz Coffee**, **Brew Over Ice 6 oz**, and **Cancel Brew**. Coffee size presets use the configured temperature and strength (Hot and Balanced by default). Keurig app favorites appear as **Brew [favorite name]** and use each favorite's saved size, temperature and strength. Create favorites in the Keurig app for additional combinations. Favorites refresh every minute.
+Control a Keurig SMART brewer from HomeKit and Matter. Connect your Keurig account in Homebridge and select the buttons you want to see.
 
-Optional settings expose **BrewID** recommended recipes for each size and **Hot Water** sizes. BrewID requires a recognized pod recipe for that size. Hot water requires an empty pod holder. K27/K27C brewers also expose **Brew 2 oz Shot** and **Brew 4 oz Shot**. Frother commands remain unverified.
+## Requirements
 
-Version **0.2.3** selects the brew protocol by discovered model. K27/K27C and K28/K28C/K28B use recipe format **2.0**, with numbered size, temperature, strength and brew-type values. K29/K29C retain the older ounce, Fahrenheit and flow-rate format. Unknown models retain power control but cannot brew until their recipe format is verified. Version 2.0 favorites use their nested saved recipe and are filtered by brewer model when the app supplies it.
+- Node.js 22.12 or later and Homebridge 1.8 or later
+- Homebridge 2.5 or later for Matter
+- A Keurig account with a Wi-Fi brewer already registered in the Keurig app
 
-The K27 format was verified against the official Android app **2.2622.0** and its public **applianceCapabilities** configuration on **2026-11-19**. For example, a custom 6 oz Hot/Balanced coffee uses size **3**, temperature **3**, strength **1** and brew type **13**. A size code is never an ounce measurement. The app still calls the command **brew** and includes **recipe_format_version: "2.0"**. This corrects a confirmed mismatch in earlier plugin requests. A user subsequently confirmed a successful 2 oz shot with version 0.2.3.
+## Installation and setup
 
-The existing 8 oz service is retained when upgrading, with its name set to Brew 8 oz Coffee. Apple Home may retain a user-assigned label. Within the accessory settings, choose **Show as Separate Tiles** if you want each switch displayed individually.
+1. Search for **homebridge-keurig** in Homebridge's **Plugins** page and install it.
+2. Open **Settings** on the Keurig plugin card. If you already signed in, choose **Check connection & refresh favorites**. Otherwise, choose **Start sign-in** and follow the browser steps. Paste the Keurig callback URL into plugin settings and keep it private.
+3. Check the controls you want. Options reflect your brewer model and include individual Keurig app favorites.
+4. Save and restart the Keurig child bridge, or restart Homebridge if the plugin runs on the main bridge.
 
-Brew actions check the machine's ready state and its reported locks and errors. Coffee requires a loaded pod when Keurig reports occupancy. Some K-Café SMART responses have a null pod-recognition field even with a pod loaded. The plugin displays that as UNKNOWN and permits a coffee request when the brewer reports BREW_READY with no lock or error, following the community client's behavior. An explicit EMPTY reading blocks coffee. Hot water requires an explicit EMPTY reading.
+Before replacing a saved sign-in, stop the Keurig bridge so it cannot refresh the old session during sign-in.
 
-A request wakes a sleeping brewer and briefly waits for readiness. If preparation or warming takes longer, power the brewer on, prepare it, and try the brew preset again. A shared 60-second guard prevents another preset from duplicating a recent request. Logs distinguish requests accepted by the API from brewing observed afterward and include the machine's brew, pod, lock and error states when preparation fails.
+## Controls
 
-Version **0.2.4** handles repeated HomeKit/UI switch writes from one tap. Writes to the same preset share an in-flight request and its result. Repeats within two seconds after API acceptance are acknowledged quietly without sending another command. Genuine failures still propagate, and later taps or another preset remain subject to the shared guard. Repeated blocked writes log one **ignored** warning per preset and guard instead of repeated brew-failure messages.
+| Group | Options |
+| --- | --- |
+| Power | Power and Cancel Brew |
+| Coffee | 4, 6, 8, 10 and 12 oz, using the temperature and strength selected in Settings |
+| Shots | 2 and 4 oz on K-Café SMART K27 and K27C |
+| Over Ice | 6 oz, plus Enhanced 8, 10 and 12 oz on supported models |
+| Hot Water | Model-specific sizes, starting at 6 oz on K27 and K28 |
+| BrewID | Recommended recipes by size, when the brewer reports a pod recipe |
+| App Favorites | One checkbox for each compatible favorite saved in the Keurig app |
 
-Version **0.2.5** also retains a preparation failure for ten seconds after the check finishes. Sequential retries of the same preset receive the original failure without repeating readiness checks, waking the brewer again, or duplicating log messages. After fixing preparation, wait ten seconds from the failure before retrying that preset. This window does not automatically start a brew when it expires. The logs now distinguish **Checking brewer readiness** from **Sending [preset] command**. A readiness failure can involve a power-on command, but no brew command is sent.
+A new setup starts with Power selected. Existing installations continue using their legacy selections until you customize them. Brew controls support K27/K27C, K28/K28C/K28B, and K29/K29C. Frother commands remain unverified.
 
-API rejections include Keurig's **errors[].description** and returned validation messages with credentials and identifiers redacted. An explicit HTTP 400 or 422 brew rejection uses a two-second debounce instead of the 60-second guard. Accepted requests and ambiguous failures such as timeouts retain the longer guard.
+## Matter
 
-Browser sign-in follows the [Home Assistant OAuth pull request](https://github.com/AdamSand10/homeassistant-keurig/pull/1) at revision 3af466915dd191d160ff3d0f0b5adcaddaedd215. Public web client settings come from that reference. You sign in to Keurig in your browser, then paste the callback URL into your local terminal. The plugin verifies its state and exchanges the code using PKCE. No separate OAuth registration is needed for this flow. Keurig's undocumented service may change.
+On Homebridge 2.5 or later, enable Matter in the Keurig child bridge settings, restart it, and pair using its Matter QR code. Each selected control appears as a named on/off outlet. Brew buttons reset after use. HomeKit and Matter share the readiness checks and duplicate protection.
 
-## Test your account on this PC
+See [Homebridge's pairing guide](https://github.com/homebridge/homebridge/wiki/Connecting-Homebridge-To-HomeKit) for bridge setup. To avoid duplicate tiles in the same controller, pair it using one transport.
 
-Use Node.js 22.12 or newer. Open PowerShell in this project folder and run:
+## Manual configuration
 
-~~~powershell
-npm run login -- .test-homebridge
+This example exposes Power, 8 oz coffee, and 6 oz hot water. The legacy key **brew** keeps the identity of the existing 8 oz switch.
+
+~~~json
+{
+  "platforms": [
+    {
+      "platform": "KeurigSmart",
+      "name": "Keurig",
+      "enableHomeKit": true,
+      "enableMatter": true,
+      "brewTemperature": "Hot",
+      "brewStrength": "Balanced",
+      "controls": { "power": true, "brew": true, "water-6": true }
+    }
+  ]
+}
 ~~~
 
-1. Open browser developer tools with F12, select **Network**, and enable **Preserve log**.
-2. Open the sign-in link printed in the terminal using that browser tab and sign in to Keurig.
-3. In Network, find the request to **https://www.keurig.com/authCallBack** whose URL contains **code=**. Open the request's Headers and copy the complete **Request URL**. The website may redirect further or show an error. The Network tab keeps the callback request.
-4. Paste the URL into the waiting terminal promptly. Treat the callback as private account data and keep it out of chat, screenshots, and issue reports.
-5. A successful test prints the registered brewer's name, model and power state.
+## Troubleshooting
 
-Toggle power in the Keurig app and run:
-
-~~~powershell
-npm run login -- .test-homebridge --check
-~~~
-
-The check reads brewer state using the saved session. It sends no appliance commands. Run it again after an hour to exercise automatic token refresh, then restart the command and confirm the session is retained.
-
-## Install from npm on Docker / NAS
-
-In Homebridge UI, search the Plugins page for **homebridge-keurig** and install it. If the package does not appear in search yet, open the Homebridge UI terminal and run:
+- **Hot water still reports an unknown pod.** Remove the pod, close the handle, and wait for the brewer to report ready. If the plugin still cannot confirm an empty holder, it blocks dispensing. Start with 6 oz on K27.
+- **The log shows PM_NOT_CYCLED.** Open the handle, prepare or replace the pod, and close the handle. Wait 10 seconds from the first failure before trying the same preset again.
+- **Did it send a brew?** Look for **Sending … command**, followed by **request accepted** and **brewer confirmed brewing**. A failed readiness check can wake the brewer, but sends no brew command.
+- **Favorites are missing.** Save the favorite in the Keurig app, choose **Check connection & refresh favorites**, then select it and save.
+- **Terminal sign-in.** Run the installed helper as the Homebridge service user with the directory containing Homebridge's config.json. This is typically /var/lib/homebridge on Linux or /homebridge in Docker.
 
 ~~~sh
-npm --prefix /homebridge install homebridge-keurig
+homebridge-keurig-login /var/lib/homebridge
+homebridge-keurig-diagnose /var/lib/homebridge
 ~~~
 
-Then follow the sign-in steps below, starting with step 3. Use a Keurig child bridge for the first test. The storage path assumes the official Homebridge Docker image.
+The diagnostic reads status by default. Adding **--brew 4** explicitly requests one 4 oz coffee. The plugin uses undocumented Keurig endpoints.
 
-## Install a local package on Docker / NAS
-
-These commands assume the official Homebridge Docker image with persistent storage mounted at **/homebridge**, as documented in the [Docker image setup](https://github.com/homebridge/docker-homebridge). Substitute the configured storage path for another image.
-
-1. Copy **homebridge-keurig-0.2.5.tgz** from this project to the NAS folder mapped to **/homebridge** in your container. Use your NAS file manager or network share.
-2. Open Homebridge UI on the other computer and choose **Terminal**. Confirm **/homebridge/config.json** exists, then install:
+## Development
 
 ~~~sh
-npm --prefix /homebridge install /homebridge/homebridge-keurig-0.2.5.tgz
-~~~
-
-3. Run sign-in in that terminal:
-
-~~~sh
-node /homebridge/node_modules/homebridge-keurig/login.js /homebridge
-~~~
-
-Open the printed link in a browser on this PC and follow the callback-copy steps above. Paste the callback into the waiting Homebridge terminal. The helper saves the session inside the container's persistent storage and prints brewer status.
-
-4. Open the KeurigSmart plugin settings, set a name and click Save to add its platform entry. Leave enableBrew off, enable a child bridge, and restart it. Pair the child bridge in Apple Home using its QR code. Test power before enabling brewing.
-
-To read state again from the terminal:
-
-~~~sh
-node /homebridge/node_modules/homebridge-keurig/login.js /homebridge --check
-~~~
-
-If reauthorizing an existing installation, stop its Keurig child bridge while the login command runs.
-
-## Package and other Homebridge installations
-
-Publishing to npm or GitHub is optional for testing. Build the package with:
-
-~~~powershell
+npm ci
 npm test
 npm pack
 ~~~
 
-Copy **homebridge-keurig-0.2.5.tgz** to the Homebridge host. From the folder containing that file, a standard Linux hb-service installation can install it with:
+The cloud client, controls catalog, Matter publisher, and Homebridge settings UI live in separate modules. Tests use simulated Keurig responses.
 
-~~~sh
-npm --prefix /var/lib/homebridge install ./homebridge-keurig-0.2.5.tgz
-~~~
-
-Use the service user's normal permissions. Docker and NAS installations should run the install inside the Homebridge container and use its plugin and storage paths. Windows installations should use their configured plugin directory.
-
-Add the platform in Homebridge UI, or merge this entry into the existing platforms array in config.json:
-
-~~~json
-{
-  "platform": "KeurigSmart",
-  "name": "Keurig",
-  "enableBrew": false
-}
-~~~
-
-Stop the Keurig child bridge during sign-in. From a terminal on the host, run the installed login helper as the service user. For a standard Linux hb-service installation:
-
-~~~sh
-node /var/lib/homebridge/node_modules/homebridge-keurig/login.js /var/lib/homebridge
-~~~
-
-Open the displayed link on your PC and copy the callback from its browser back into the host terminal. The storage argument must point to the directory holding Homebridge's config.json. The helper saves keurig-session.json there. Alternatively, transfer your successfully tested session from .test-homebridge into that storage directory while the Keurig child bridge is stopped. Keep the session private to the service user. Run only one plugin instance against a session file because refresh tokens rotate.
-
-Start the Keurig child bridge, add its bridge to Apple Home when prompted, and test power. Change power from the Keurig app and allow about 60 seconds for the Home tile to update. Once power and session persistence work, prepare water, a fresh pod, and a suitable mug, then enable the optional brew switches and try one brew. Start the K27 acceptance test with **Brew 6 oz Coffee**, Hot/Balanced. The plugin requires a ready brewer with no reported lock or error. Each accepted brew request has a 60-second duplicate guard. API command failures are returned to HomeKit.
-
-## Development and distribution
-
-For a one-off HTTP 400 investigation, the development source includes a diagnostic command. It reads the existing Homebridge session without refreshing tokens. Its default mode reads status. Adding **--brew 4** explicitly requests one 4 oz coffee, with the normal readiness checks, and prints the response content type, byte count and redacted body if the request is rejected. Prepare a fresh pod and suitable mug before using that option. It sends no automatic retries and does not update the installed plugin.
-
-~~~sh
-npm exec --yes --package=github:dean1d/homebridge-keurig#main -- homebridge-keurig-diagnose /var/lib/homebridge --brew 4
-~~~
-
-The plugin has no runtime npm dependencies. npm test uses simulated Keurig responses. The package has been loaded against Homebridge 2.0.2 locally. Brew confirmation remains part of acceptance testing for each preset.
-
-Source and issue reports belong at [dean1d/homebridge-keurig](https://github.com/dean1d/homebridge-keurig). The plugin is MIT licensed. The first npm release is experimental and still needs a live account and brewer acceptance test.
-
-The earlier Python checker uses the retired password endpoint. Use the Node browser sign-in helper above.
+See [CHANGELOG.md](CHANGELOG.md) for release notes.

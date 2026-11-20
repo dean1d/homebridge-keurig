@@ -1,6 +1,8 @@
 'use strict';
 
-const { KeurigCloud, sizes } = require('./cloud');
+const { KeurigCloud } = require('./cloud');
+const { enabledControls } = require('./controls');
+const { KeurigMatter } = require('./matter');
 
 const plugin = 'homebridge-keurig';
 const platform = 'KeurigSmart';
@@ -11,6 +13,8 @@ class KeurigPlatform {
     this.config = config;
     this.api = api;
     this.accessories = new Map();
+    this.deviceAccessories = new Map();
+    this.matter = new KeurigMatter(this);
     this.operations = new Map();
     this.blockedWrites = new Map();
     this.preparationFailures = new Map();
@@ -19,56 +23,65 @@ class KeurigPlatform {
       log.info('Starting Keurig platform v' + require('./package.json').version + '. Session storage: ' + api.user.storagePath());
       this.poll();
     });
-    api.on('shutdown', () => { this.stopped = true; clearTimeout(this.timer); });
+    api.on('shutdown', () => { this.stopped = true; clearTimeout(this.timer); this.matter.stop(); });
   }
 
   configureAccessory(accessory) {
     this.accessories.set(accessory.UUID, accessory);
-    if (accessory.context.deviceId) this.bind(accessory, accessory.context.deviceId);
+    if (accessory.context.deviceId) {
+      accessory.context.model ||= accessory.getService(this.api.hap.Service.AccessoryInformation)
+        ?.getCharacteristic(this.api.hap.Characteristic.Model).value;
+      this.deviceAccessories.set(accessory.context.deviceId, accessory);
+      if (accessory.context.model) this.bind(accessory, accessory.context.deviceId);
+    }
   }
+
+  configureMatterAccessory(accessory) { this.matter.configure(accessory); }
 
   bind(accessory, id) {
     const { Service, Characteristic } = this.api.hap;
-    const power = accessory.getServiceById(Service.Switch, 'power') ||
-      accessory.addService(Service.Switch, 'Power', 'power');
-    this.nameService(power, 'Power');
-    power.getCharacteristic(Characteristic.On)
-      .onGet(async () => (await this.cloud.state(id)).on)
-      .onSet(async on => {
-        try { await this.cloud.command(id, on ? 'idle' : 'standby'); }
-        catch (err) {
-          this.log.warn('Power failed: ' + err.message);
-          throw new this.api.hap.HapStatusError(this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
-        }
-      });
-
-    const presets = this.presets(accessory.context.favorites || [], accessory.context.model);
-    const wanted = new Set(['power', ...presets.map(preset => preset.subtype)]);
+    const controls = enabledControls(this.config, accessory.context.model, accessory.context.favorites || []);
+    const wanted = new Set(controls.map(control => control.subtype));
     for (const service of [...accessory.services]) {
       if (service.UUID === Service.Switch.UUID && !wanted.has(service.subtype)) accessory.removeService(service);
     }
-    for (const preset of presets) {
-      const action = accessory.getServiceById(Service.Switch, preset.subtype) ||
-        accessory.addService(Service.Switch, preset.name, preset.subtype);
-      this.nameService(action, preset.name);
-      action.getCharacteristic(Characteristic.On).onGet(() => false).onSet(async on => {
-        if (!on) return;
-        try {
-          if (preset.mode === 'cancel') {
-            try {
-              await this.cloud.command(id, 'cancel_brew');
-              this.log.info('Cancel brew requested.');
-            } catch (err) {
-              throw this.brewFailure(preset, err);
+    for (const control of controls) {
+      const action = accessory.getServiceById(Service.Switch, control.subtype) ||
+        accessory.addService(Service.Switch, control.name, control.subtype);
+      this.nameService(action, control.name);
+      action.getCharacteristic(Characteristic.On)
+        .onGet(control.mode === 'power' ? async () => (await this.cloud.state(id)).on : () => false)
+        .onSet(async on => {
+          if (control.mode !== 'power' && !on) return;
+          try { await this.executeControl(accessory, id, control, on); }
+          finally {
+            if (control.mode !== 'power') {
+              setTimeout(() => action.updateCharacteristic(Characteristic.On, false), 150).unref();
             }
-            return;
           }
-          await this.brew(accessory, id, preset);
-        } finally {
-          setTimeout(() => action.updateCharacteristic(Characteristic.On, false), 150).unref();
-        }
-      });
+        });
     }
+  }
+
+  async executeControl(accessory, id, control, on = true) {
+    if (control.mode === 'power' || control.mode === 'cancel') {
+      try {
+        await this.cloud.command(id, control.mode === 'cancel' ? 'cancel_brew' : on ? 'idle' : 'standby');
+        if (control.mode === 'cancel') this.log.info('Cancel brew requested.');
+        else {
+          this.matter.power.set(id, on);
+          accessory.getServiceById?.(this.api.hap.Service.Switch, 'power')
+            ?.updateCharacteristic(this.api.hap.Characteristic.On, on);
+        }
+      } catch (error) { throw this.brewFailure(control, error); }
+      return;
+    }
+    return this.brew(accessory, id, control);
+  }
+
+  async saveContext(accessory) {
+    if (this.accessories.has(accessory.UUID)) this.api.updatePlatformAccessories([accessory]);
+    await this.matter.persist(accessory);
   }
 
   brewFailure(preset, error) {
@@ -134,13 +147,13 @@ class KeurigPlatform {
         accessory.context.lastBrewRejected = false;
         accessory.context.lastBrewAccepted = false;
         accessory.context.lastBrewPreset = preset.subtype;
-        this.api.updatePlatformAccessories([accessory]);
+        await this.saveContext(accessory);
         operation.submitted = true;
         this.log.info('Sending ' + preset.name + ' command to ' + accessory.displayName);
       });
       accessory.context.lastBrewAccepted = true;
       accessory.context.lastBrewAcceptedAt = Date.now();
-      this.api.updatePlatformAccessories([accessory]);
+      await this.saveContext(accessory).catch(() => this.log.warn('Could not save the accepted brew state.'));
       this.log.info(preset.name + ': request accepted. Checking brewer state...');
       // Confirm in the background so HomeKit can acknowledge the momentary switch promptly.
       this.cloud.confirmBrew(id)
@@ -151,7 +164,7 @@ class KeurigPlatform {
         // Keep a short debounce for repeated writes after a definite rejection.
         accessory.context.nextBrew = Date.now() + 2000;
         accessory.context.lastBrewRejected = true;
-        this.api.updatePlatformAccessories([accessory]);
+        await this.saveContext(accessory).catch(() => this.log.warn('Could not save the rejected brew state.'));
       }
       throw err;
     }
@@ -167,88 +180,78 @@ class KeurigPlatform {
     service.setCharacteristic(Characteristic.ConfiguredName, name);
   }
 
-  presets(favorites, model) {
-    if (!this.config.enableBrew) return [];
-    const temperature = this.config.brewTemperature || 'Hot';
-    const strength = this.config.brewStrength || 'Balanced';
-    const presets = sizes.map(size => ({
-      subtype: size === 8 ? 'brew' : 'coffee-' + size,
-      name: 'Brew ' + size + ' oz Coffee', size, mode: 'coffee', temperature, strength,
-    }));
-    presets.push({ subtype: 'iced', name: 'Brew Over Ice 6 oz', mode: 'iced' },
-      { subtype: 'cancel', name: 'Cancel Brew', mode: 'cancel' });
-    if (['K27', 'K27C'].includes(model)) {
-      presets.push(...[2, 4].map(size => ({ subtype: 'shot-' + size,
-        name: 'Brew ' + size + ' oz Shot', size, mode: 'shot' })));
-    }
-    if (this.config.enableRecommended) {
-      presets.push(...sizes.map(size => ({ subtype: 'recommended-' + size,
-        name: 'BrewID ' + size + ' oz Coffee', size, mode: 'recommended' })));
-    }
-    if (this.config.enableHotWater) {
-      presets.push(...sizes.map(size => ({ subtype: 'water-' + size,
-        name: 'Dispense ' + size + ' oz Hot Water', size, mode: 'water', temperature })));
-    }
-    if (this.config.enableFavorites !== false) {
-      presets.push(...favorites.map(favorite => ({ subtype: 'favorite-' + favorite.id,
-        name: 'Brew ' + (favorite.name || 'Favorite'), mode: 'favorite', favoriteId: favorite.id })));
-    }
-    return presets;
-  }
-
   async poll() {
     let failed = false;
     try {
       const devices = await this.cloud.devices();
       let favorites;
-      if (this.config.enableBrew && this.config.enableFavorites !== false) {
+      const needsFavorites = this.config.controls
+        ? Object.entries(this.config.controls).some(([key, enabled]) => key.startsWith('favorite-') && enabled === true)
+        : this.config.enableBrew && this.config.enableFavorites !== false;
+      if (needsFavorites) {
         try { favorites = (await this.cloud.favorites()).map(({ id, name, deviceModel }) => ({ id, name, deviceModel })); }
         catch (err) { this.log.warn('Keurig favorites: ' + err.message); }
       }
       const seen = new Set();
+      const records = [];
       for (const device of devices) {
         if (this.stopped) return;
+        seen.add(device.id);
         const uuid = this.api.hap.uuid.generate(plugin + ':' + device.id);
-        const deviceFavorites = favorites?.filter(favorite => !favorite.deviceModel || favorite.deviceModel === device.model);
-        seen.add(uuid);
-        let accessory = this.accessories.get(uuid);
+        let accessory = this.deviceAccessories.get(device.id) || this.accessories.get(uuid);
         if (!accessory) {
           accessory = new this.api.platformAccessory(device.registration?.name || 'Keurig', uuid);
-          accessory.context.deviceId = device.id;
-          accessory.context.model = device.model;
+          accessory.context = { ...(this.matter.restoredState(device.id) || {}), deviceId: device.id };
+          this.deviceAccessories.set(device.id, accessory);
+        }
+        const restored = this.matter.restoredState(device.id);
+        if ((restored?.nextBrew || 0) > (accessory.context.nextBrew || 0)) {
+          accessory.context = { ...accessory.context, ...restored, deviceId: device.id };
+        }
+        accessory.context.model = device.model;
+        if (favorites) accessory.context.favorites = favorites.filter(favorite =>
+          !favorite.deviceModel || favorite.deviceModel === device.model);
+        accessory.context.favorites ||= [];
+        const controls = enabledControls(this.config, device.model, accessory.context.favorites);
+        const publishHap = this.config.enableHomeKit !== false && this.api.isHapEnabled?.() !== false && controls.length > 0;
+        if (publishHap) {
           const { Service, Characteristic } = this.api.hap;
           accessory.getService(Service.AccessoryInformation)
             .setCharacteristic(Characteristic.Manufacturer, 'Keurig')
             .setCharacteristic(Characteristic.Model, String(device.model || 'SMART'))
             .setCharacteristic(Characteristic.SerialNumber, String(device.serialNumber || device.id));
-          accessory.context.favorites = deviceFavorites || [];
           this.bind(accessory, device.id);
-          this.api.registerPlatformAccessories(plugin, platform, [accessory]);
-          this.accessories.set(uuid, accessory);
-          this.log.info('Discovered ' + accessory.displayName + '. Published Power and configured brew presets.');
-        } else if (accessory.context.model !== device.model ||
-            (deviceFavorites && JSON.stringify(deviceFavorites) !== JSON.stringify(accessory.context.favorites))) {
-          accessory.context.model = device.model;
-          if (deviceFavorites) accessory.context.favorites = deviceFavorites;
-          this.bind(accessory, device.id);
-          this.api.updatePlatformAccessories([accessory]);
-        }
-        const { Service, Characteristic } = this.api.hap;
-        const power = accessory.getServiceById(Service.Switch, 'power');
-        try {
-          power.updateCharacteristic(Characteristic.On, (await this.cloud.state(device.id)).on);
-        } catch (err) {
-          power.updateCharacteristic(Characteristic.On, err);
-          failed = true;
-          this.log.warn('Keurig status: ' + err.message);
-        }
-      }
-      for (const [uuid, accessory] of this.accessories) {
-        if (!seen.has(uuid)) {
+          if (!this.accessories.has(uuid)) {
+            this.api.registerPlatformAccessories(plugin, platform, [accessory]);
+            this.accessories.set(uuid, accessory);
+            this.log.info('Discovered ' + accessory.displayName + '. Published ' + controls.length + ' selected HomeKit controls.');
+          } else this.api.updatePlatformAccessories([accessory]);
+        } else if (this.accessories.has(uuid)) {
           this.api.unregisterPlatformAccessories(plugin, platform, [accessory]);
           this.accessories.delete(uuid);
         }
+        const record = { device, accessory, controls };
+        try {
+          record.state = await this.cloud.state(device.id);
+          if (publishHap) accessory.getServiceById(this.api.hap.Service.Switch, 'power')
+            ?.updateCharacteristic(this.api.hap.Characteristic.On, record.state.on);
+        } catch (err) {
+          failed = true;
+          this.log.warn('Keurig status: ' + err.message);
+        }
+        records.push(record);
       }
+      for (const [id, accessory] of this.deviceAccessories) {
+        if (!seen.has(id)) {
+          if (this.accessories.has(accessory.UUID)) {
+            this.api.unregisterPlatformAccessories(plugin, platform, [accessory]);
+            this.accessories.delete(accessory.UUID);
+          }
+          this.deviceAccessories.delete(id);
+          this.preparationFailures.delete(id);
+        }
+      }
+      if (!this.stopped) await this.matter.sync(records);
     } catch (err) {
       failed = true;
       this.log.warn('Keurig discovery: ' + err.message);
@@ -257,6 +260,7 @@ class KeurigPlatform {
       if (!this.stopped) this.timer = setTimeout(() => this.poll(), this.delay);
     }
   }
+
 }
 
 module.exports = api => api.registerPlatform(plugin, platform, KeurigPlatform);
