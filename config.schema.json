@@ -103,16 +103,6 @@
         "brewTemperature",
         "brewStrength"
       ]
-    },
-    {
-      "type": "fieldset",
-      "title": "Advanced account settings",
-      "expandable": true,
-      "expanded": false,
-      "items": [
-        "clientId",
-        "subscriptionKey"
-      ]
     }
   ]
 }
