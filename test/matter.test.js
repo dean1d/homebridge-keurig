@@ -103,6 +103,11 @@ test('Matter stays optional and preserves real brew errors', async t => {
   await platform.matter.sync([record]);
   assert.equal(calls.registered.length, 0);
   api.isMatterEnabled = () => true;
+  api.isMatterExternalsOnly = () => true;
+  await platform.matter.sync([record]);
+  assert.equal(calls.registered.length, 0);
+  api.isMatterExternalsOnly = () => false;
+  platform.config.enableMatter = false; // Old plugin setting must not override the bridge.
   await platform.matter.sync([record]);
   platform.cloud.startBrew = async () => { throw new Error('Brewer is locked'); };
   await assert.rejects(calls.registered[0][0].handlers.onOff.on(), /Keurig command failed/);

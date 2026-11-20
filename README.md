@@ -42,6 +42,8 @@ A new setup starts with Power selected. Existing installations continue using th
 
 ## Matter
 
+Choose HomeKit and Matter in the Homebridge bridge settings. If you previously disabled a transport with a Keurig-specific checkbox, disable it on the Keurig child bridge instead.
+
 On Homebridge 2.5 or later, enable Matter in the Keurig child bridge settings, restart it, and pair using its Matter QR code. Each selected control appears as a named on/off outlet. Brew buttons reset after use. HomeKit and Matter share the readiness checks and duplicate protection.
 
 See [Homebridge's pairing guide](https://github.com/homebridge/homebridge/wiki/Connecting-Homebridge-To-HomeKit) for bridge setup. To avoid duplicate tiles in the same controller, pair it using one transport.
@@ -56,8 +58,6 @@ This example exposes Power, 8 oz coffee, and 6 oz hot water. The legacy key **br
     {
       "platform": "KeurigSmart",
       "name": "Keurig",
-      "enableHomeKit": true,
-      "enableMatter": true,
       "brewTemperature": "Hot",
       "brewStrength": "Balanced",
       "controls": { "power": true, "brew": true, "water-6": true }

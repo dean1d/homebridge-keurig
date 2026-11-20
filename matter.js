@@ -14,11 +14,8 @@ class KeurigMatter {
   }
 
   enabled() {
-    return this.platform.config.enableMatter !== false && this.available();
-  }
-
-  available() {
-    return this.api.isMatterEnabled?.() === true && !!this.api.matter && this.api.versionGreaterOrEqual?.('2.5.0') === true;
+    return this.api.isMatterEnabled?.() === true && !this.api.isMatterExternalsOnly?.() &&
+      !!this.api.matter && this.api.versionGreaterOrEqual?.('2.5.0') === true;
   }
 
   configure(accessory) { this.cached.set(accessory.UUID, accessory); }
@@ -93,15 +90,16 @@ class KeurigMatter {
   }
 
   async sync(records) {
-    if (!this.available()) {
-      if (!this.warned && this.api.isMatterEnabled?.() && this.platform.config.enableMatter !== false) {
+    if (!this.enabled()) {
+      if (!this.warned && this.api.isMatterEnabled?.() && !this.api.isMatterExternalsOnly?.() &&
+          !this.api.versionGreaterOrEqual?.('2.5.0')) {
         this.warned = true;
         this.platform.log.warn('Keurig Matter requires Homebridge 2.5.0 or later.');
       }
       return;
     }
     const matter = this.api.matter;
-    const desired = this.enabled() ? records.flatMap(record => record.controls.map(control => this.accessory(record, control))) : [];
+    const desired = records.flatMap(record => record.controls.map(control => this.accessory(record, control)));
     const signature = JSON.stringify(desired.map(record => [record.UUID, record.displayName, record.model]));
     if (signature !== this.signature) {
       const wanted = new Set(desired.map(record => record.UUID));

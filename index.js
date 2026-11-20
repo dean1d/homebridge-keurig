@@ -213,7 +213,7 @@ class KeurigPlatform {
           !favorite.deviceModel || favorite.deviceModel === device.model);
         accessory.context.favorites ||= [];
         const controls = enabledControls(this.config, device.model, accessory.context.favorites);
-        const publishHap = this.config.enableHomeKit !== false && this.api.isHapEnabled?.() !== false && controls.length > 0;
+        const publishHap = this.api.isHapEnabled?.() !== false && !this.api.isHapExternalsOnly?.() && controls.length > 0;
         if (publishHap) {
           const { Service, Characteristic } = this.api.hap;
           accessory.getService(Service.AccessoryInformation)

@@ -63,17 +63,6 @@
         "type": "boolean",
         "default": false
       },
-      "enableHomeKit": {
-        "title": "Publish HomeKit controls",
-        "type": "boolean",
-        "default": true
-      },
-      "enableMatter": {
-        "title": "Publish Matter controls",
-        "description": "Also enable Matter in the Keurig child bridge settings. Requires Homebridge 2.5 or later.",
-        "type": "boolean",
-        "default": true
-      },
       "controls": {
         "title": "Selected controls",
         "description": "Managed by the model-aware control checkboxes above.",
@@ -87,15 +76,7 @@
   "customUi": true,
   "headerDisplay": "Connect a Keurig SMART brewer and choose the controls shown in HomeKit and Matter.",
   "layout": [
-    {
-      "type": "fieldset",
-      "title": "Publication",
-      "items": [
-        "name",
-        "enableHomeKit",
-        "enableMatter"
-      ]
-    },
+    "name",
     {
       "type": "fieldset",
       "title": "Coffee defaults",
