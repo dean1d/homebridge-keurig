@@ -1,5 +1,9 @@
 # homebridge-keurig
 
+<p align="center">
+  <img src="assets/keuriglogo_0.jpg" alt="Keurig logo" width="180" />
+</p>
+
 [![npm version](https://img.shields.io/npm/v/homebridge-keurig)](https://www.npmjs.com/package/homebridge-keurig)
 [![npm weekly downloads](https://img.shields.io/npm/dw/homebridge-keurig)](https://www.npmjs.com/package/homebridge-keurig)
 
