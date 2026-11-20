@@ -79,6 +79,21 @@ homebridge-keurig-diagnose /var/lib/homebridge
 
 The diagnostic reads status by default. Adding **--brew 4** explicitly requests one 4 oz coffee. The plugin uses undocumented Keurig endpoints.
 
+## Start over with a fresh sign-in
+
+The saved Keurig session is separate from the plugin configuration and cached accessories. Uninstalling the plugin does not remove it.
+
+1. Stop the Keurig child bridge, or stop Homebridge if the plugin runs on the main bridge. Close any open Keurig settings dialog.
+2. In the Homebridge host terminal, delete the saved session from the directory containing Homebridge's config.json. For a standard Linux installation, run:
+
+   ~~~sh
+   rm -f -- /var/lib/homebridge/keurig-session.json
+   ~~~
+
+   For the official Docker image, use /homebridge/keurig-session.json. This clears the plugin's local sign-in.
+3. If you also want to reset accessory choices and pairings, remove the Keurig platform entry and its cached accessories through Homebridge. Remove the Keurig child bridge from your HomeKit or Matter controller if you paired it there.
+4. Reopen Keurig settings after reinstalling. It should offer **Start sign-in**. Use a private browser tab if you also want Keurig to prompt for credentials instead of using an existing browser session.
+
 ## Development
 
 ~~~sh
