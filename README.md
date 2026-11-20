@@ -48,6 +48,8 @@ A new setup starts with Power selected. Existing installations continue using th
 
 Manage both transports in the Homebridge bridge settings. Use one pairing method per controller to avoid duplicate tiles. [Homebridge pairing guide](https://github.com/homebridge/homebridge/wiki/Connecting-Homebridge-To-HomeKit)
 
+Keurig supplies labels such as **K-Cafe SMART Power** for individual Matter controls. Apple Home may still show **Matter Accessory** for the bridge during pairing because it ignores the bridge's advertised name. Choose the name you want in Apple Home during setup or in the accessory settings after pairing. [Matter naming behavior](https://github.com/matter-js/matter.js/blob/main/docs/KNOWN_ISSUES.md#apple-homeios) · [Apple Home naming instructions](https://support.apple.com/guide/iphone/control-accessories-iph0a717a8fd/ios)
+
 ## Manual configuration
 
 This example exposes Power, 8 oz coffee, and 6 oz hot water. The legacy key **brew** keeps the identity of the existing 8 oz switch.
