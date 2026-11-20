@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1
+
+- Follow Homebridge bridge settings for HomeKit and Matter publication. Set any transport preferences previously managed by the Keurig checkboxes on the bridge itself.
+- Remove advanced account overrides from the settings screen. Existing manual overrides remain supported.
+- Update the README logo, credits, donation links, reset instructions, and K-Café naming guidance.
+
 ## 0.3.0
 
 - Add browser sign-in and favorite discovery to Homebridge settings.
