@@ -40,13 +40,13 @@ Before replacing a saved sign-in, stop the Keurig bridge so it cannot refresh th
 
 A new setup starts with Power selected. Existing installations continue using their legacy selections until you customize them. Brew controls support K27/K27C, K28/K28C/K28B, and K29/K29C. Frother commands remain unverified.
 
-## Matter
+## Apple Home and Matter
 
-Choose HomeKit and Matter in the Homebridge bridge settings. If you previously disabled a transport with a Keurig-specific checkbox, disable it on the Keurig child bridge instead.
+**For Apple Home, we recommend HomeKit (HAP).** HomeKit groups your selected controls under one brewer accessory, so your coffee, hot water, and power controls can stay together in a single tile.
 
-On Homebridge 2.5 or later, enable Matter in the Keurig child bridge settings, restart it, and pair using its Matter QR code. Each selected control appears as a named on/off outlet. Brew buttons reset after use. HomeKit and Matter share the readiness checks and duplicate protection.
+**You can use HomeKit and Matter at the same time.** Keep the HomeKit pairing in Apple Home and enable Matter on the Keurig child bridge to share the same brewer with other Matter platforms. Matter requires Homebridge 2.5 or later. After enabling it, restart the child bridge and use its Matter QR code to pair with your other platform. Matter shows each selected control as a separate named on/off outlet. Brew buttons reset after use, and both transports share the same readiness checks and duplicate protection.
 
-See [Homebridge's pairing guide](https://github.com/homebridge/homebridge/wiki/Connecting-Homebridge-To-HomeKit) for bridge setup. To avoid duplicate tiles in the same controller, pair it using one transport.
+Manage both transports in the Homebridge bridge settings. Use one pairing method per controller to avoid duplicate tiles. [Homebridge pairing guide](https://github.com/homebridge/homebridge/wiki/Connecting-Homebridge-To-HomeKit)
 
 ## Manual configuration
 
