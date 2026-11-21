@@ -19,6 +19,48 @@ function setup() {
   return { platform, accessory, preset, warnings, messages };
 }
 
+test('HomeKit Power reads use the last poll and accepted writes without contacting Keurig', async t => {
+  const { platform, accessory, warnings } = setup();
+  const power = { onGet(handler) { this.read = handler; return this; }, onSet(handler) { this.write = handler; } };
+  const service = { UUID: 'switch', subtype: 'power', getCharacteristic: () => power, updateCharacteristic() {} };
+  const info = { setCharacteristic() { return this; } };
+  Object.assign(accessory, {
+    UUID: 'cafe', services: [service], context: { deviceId: 'cafe', model: 'K27' },
+    getService: () => info, getServiceById: () => service,
+  });
+  Object.assign(platform.api.hap, {
+    Service: { Switch: { UUID: 'switch' }, AccessoryInformation: 'info' },
+    Characteristic: { On: 'on' }, uuid: { generate: () => 'cafe' },
+  });
+  platform.nameService = () => {};
+  platform.configureAccessory(accessory);
+  platform.cloud.devices = async () => [{ id: 'cafe', model: 'K27' }];
+  t.after(() => clearTimeout(platform.timer));
+  const poll = async () => { clearTimeout(platform.timer); await platform.poll(); };
+  let reads = 0;
+  platform.cloud.state = async () => { reads++; return { on: true }; };
+  assert.equal(await power.read(), false);
+  await poll();
+  assert.equal(await power.read(), true);
+  assert.equal(await power.read(), true);
+  assert.equal(reads, 1);
+
+  const pending = Promise.withResolvers();
+  const started = Promise.withResolvers();
+  platform.cloud.state = () => { started.resolve(); return pending.promise; };
+  const inFlightPoll = poll();
+  await started.promise;
+  platform.cloud.command = async (_id, command) => assert.equal(command, 'standby');
+  await power.write(false);
+  pending.resolve({ on: true });
+  await inFlightPoll;
+  assert.equal(await power.read(), false);
+  platform.cloud.state = async () => { throw new Error('cloud timeout'); };
+  await poll();
+  assert.equal(await power.read(), false);
+  assert.deepEqual(warnings, ['Keurig status: cloud timeout']);
+});
+
 test('same-tap writes share one in-flight brew and acknowledge accepted repeats without false errors', async () => {
   const { platform, accessory, preset, warnings, messages } = setup();
   const gate = Promise.withResolvers();

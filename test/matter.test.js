@@ -23,7 +23,7 @@ function setup(modern = true) {
   platform.cloud.confirmBrew = async () => {};
   const accessory = { UUID: 'hap-cafe', displayName: 'KCafe SMART', context: { deviceId: 'cafe' } };
   const control = { subtype: 'shot-2', name: 'Brew 2 oz Shot', mode: 'shot', size: 2 };
-  const record = { accessory, device: { id: 'cafe', model: 'K27' }, controls: [control], state: { on: true } };
+  const record = { accessory, device: { id: 'cafe', model: 'K27' }, controls: [control] };
   return { platform, api, calls, accessory, control, record };
 }
 

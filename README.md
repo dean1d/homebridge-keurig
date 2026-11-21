@@ -4,6 +4,7 @@
   <img src="assets/keuriglogo_0.jpg" alt="Keurig logo" width="180" />
 </p>
 
+[![verified-by-homebridge](https://img.shields.io/badge/homebridge-verified-blueviolet?color=%23491F59&style=flat)](https://github.com/homebridge/homebridge/wiki/Verified-Plugins)
 [![npm version](https://img.shields.io/npm/v/homebridge-keurig)](https://www.npmjs.com/package/homebridge-keurig)
 [![npm weekly downloads](https://img.shields.io/npm/dw/homebridge-keurig)](https://www.npmjs.com/package/homebridge-keurig)
 
@@ -20,11 +21,21 @@ Control a Keurig SMART brewer from HomeKit and Matter. Connect your Keurig accou
 If your brewer has an accented **é** in its default name, rename it in the Keurig app before Homebridge discovers it. For example, change **K-Café SMART** to **K-Cafe SMART**. If you already added the brewer to a controller, you can rename its existing tile there.
 
 1. Search for **homebridge-keurig** in Homebridge's **Plugins** page and install it.
-2. Open **Settings** on the Keurig plugin card. If you already signed in, choose **Check connection & refresh favorites**. Otherwise, choose **Start sign-in** and follow the browser steps. Paste the Keurig callback URL into plugin settings and keep it private.
+2. Open **Settings** on the Keurig plugin card. If you already signed in, choose **Check connection & refresh favorites**. For a new connection, follow the [step-by-step browser sign-in guide](#sign-in-to-keurig).
 3. Check the controls you want. Options reflect your brewer model and include individual Keurig app favorites.
 4. Save and restart the Keurig child bridge, or restart Homebridge if the plugin runs on the main bridge.
 
-Before replacing a saved sign-in, stop the Keurig bridge so it cannot refresh the old session during sign-in.
+## Sign in to Keurig
+
+Use a desktop browser such as Chrome or Edge for the network log. Before replacing a saved sign-in, stop the Keurig bridge so it cannot refresh the old session during sign-in.
+
+1. In Homebridge, open **Plugins → Keurig Settings** and choose **Start sign-in**. Select **Open Keurig sign-in** to open a new tab.
+2. In that tab, open **Developer Tools** from the browser menu. Select **Network** and turn on **Preserve log** before signing in.
+3. Sign in on Keurig's website. In the Network list, filter for **authCallBack**, select the request, and open **Headers**. Copy the complete **Request URL** for `https://www.keurig.com/authCallBack` containing both `code=` and `state=`, even if the browser has already redirected to another page.
+4. Return to Homebridge and paste the URL into **Keurig callback URL**. Choose **Save sign-in**. Keep the URL private because it contains a temporary sign-in code.
+5. Once your brewer appears, select your controls, save the plugin settings, and start or restart the Keurig bridge.
+
+If the callback is visible in your browser's address bar with both parameters intact, copy it directly and skip the Network panel.
 
 ## Controls
 

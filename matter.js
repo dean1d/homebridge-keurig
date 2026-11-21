@@ -10,7 +10,6 @@ class KeurigMatter {
     this.api = platform.api;
     this.cached = new Map();
     this.timers = new Set();
-    this.power = new Map();
   }
 
   enabled() {
@@ -62,7 +61,6 @@ class KeurigMatter {
       if (control.mode !== 'power' && !on) return;
       try {
         await this.platform.executeControl(accessory, device.id, control, on);
-        if (control.mode === 'power') this.power.set(device.id, on);
       } catch {
         const Failure = matter.status?.Failure;
         throw Failure ? new Failure('Keurig command failed. Check the Homebridge log.')
@@ -80,10 +78,10 @@ class KeurigMatter {
       serialNumber: uuid,
       manufacturer: 'Keurig', model: String(device.model || 'SMART'), firmwareRevision: version,
       context: { deviceId: device.id, subtype: control.subtype, brewState: accessory.context },
-      clusters: { onOff: { onOff: control.mode === 'power' ? (this.power.get(device.id) || false) : false } },
+      clusters: { onOff: { onOff: control.mode === 'power' && this.platform.powerOn(device.id) } },
       handlers: { onOff: {
         on: () => run(true), off: () => run(false),
-        toggle: () => run(control.mode === 'power' ? !this.power.get(device.id) : true),
+        toggle: () => run(control.mode !== 'power' || !this.platform.powerOn(device.id)),
       } },
       _associatedPlugin: plugin, _associatedPlatform: platformName,
     };
@@ -112,13 +110,10 @@ class KeurigMatter {
       this.platform.log.info('Published ' + desired.length + ' selected Matter controls.');
     }
     // Reset momentary states restored from cache and publish polled power state.
-    for (const record of records) {
-      if (record.state) this.power.set(record.device.id, record.state.on);
-    }
     for (const accessory of this.cached.values()) {
       const power = accessory.context.subtype === 'power';
       await matter.updateAccessoryState(accessory.UUID, 'onOff', {
-        onOff: power ? (this.power.get(accessory.context.deviceId) || false) : false,
+        onOff: power && this.platform.powerOn(accessory.context.deviceId),
       });
     }
   }

@@ -14,6 +14,7 @@ class KeurigPlatform {
     this.api = api;
     this.accessories = new Map();
     this.deviceAccessories = new Map();
+    this.powerStates = new Map();
     this.matter = new KeurigMatter(this);
     this.operations = new Map();
     this.blockedWrites = new Map();
@@ -38,6 +39,8 @@ class KeurigPlatform {
 
   configureMatterAccessory(accessory) { this.matter.configure(accessory); }
 
+  powerOn(id) { return this.powerStates.get(id)?.on ?? false; }
+
   bind(accessory, id) {
     const { Service, Characteristic } = this.api.hap;
     const controls = enabledControls(this.config, accessory.context.model, accessory.context.favorites || []);
@@ -50,7 +53,7 @@ class KeurigPlatform {
         accessory.addService(Service.Switch, control.name, control.subtype);
       this.nameService(action, control.name);
       action.getCharacteristic(Characteristic.On)
-        .onGet(control.mode === 'power' ? async () => (await this.cloud.state(id)).on : () => false)
+        .onGet(control.mode === 'power' ? () => this.powerOn(id) : () => false)
         .onSet(async on => {
           if (control.mode !== 'power' && !on) return;
           try { await this.executeControl(accessory, id, control, on); }
@@ -69,7 +72,7 @@ class KeurigPlatform {
         await this.cloud.command(id, control.mode === 'cancel' ? 'cancel_brew' : on ? 'idle' : 'standby');
         if (control.mode === 'cancel') this.log.info('Cancel brew requested.');
         else {
-          this.matter.power.set(id, on);
+          this.powerStates.set(id, { on });
           accessory.getServiceById?.(this.api.hap.Service.Switch, 'power')
             ?.updateCharacteristic(this.api.hap.Characteristic.On, on);
         }
@@ -232,9 +235,12 @@ class KeurigPlatform {
         }
         const record = { device, accessory, controls };
         try {
-          record.state = await this.cloud.state(device.id);
+          const previousPower = this.powerStates.get(device.id);
+          const { on } = await this.cloud.state(device.id);
+          // An acknowledged power write takes precedence over a poll already in flight.
+          if (this.powerStates.get(device.id) === previousPower) this.powerStates.set(device.id, { on });
           if (publishHap) accessory.getServiceById(this.api.hap.Service.Switch, 'power')
-            ?.updateCharacteristic(this.api.hap.Characteristic.On, record.state.on);
+            ?.updateCharacteristic(this.api.hap.Characteristic.On, this.powerOn(device.id));
         } catch (err) {
           failed = true;
           this.log.warn('Keurig status: ' + err.message);
@@ -248,6 +254,7 @@ class KeurigPlatform {
             this.accessories.delete(accessory.UUID);
           }
           this.deviceAccessories.delete(id);
+          this.powerStates.delete(id);
           this.preparationFailures.delete(id);
         }
       }
