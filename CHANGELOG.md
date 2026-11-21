@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2
+
+- Serve Power reads from the last known state. Successful commands update it immediately, and a failed poll preserves it.
+- Add the Verified by Homebridge badge and a step-by-step browser sign-in guide.
+- Explain HomeKit grouping, simultaneous Matter use, and the generic Matter pairing label in Apple Home.
+
 ## 0.3.1
 
 - Follow Homebridge bridge settings for HomeKit and Matter publication. Set any transport preferences previously managed by the Keurig checkboxes on the bridge itself.
