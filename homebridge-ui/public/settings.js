@@ -6,6 +6,7 @@
   let catalog = [];
   let canEditControls = true;
   let queue = Promise.resolve();
+  let pendingEdits = 0;
   const $ = id => document.getElementById(id);
   const notice = (message, failed = false) => {
     $('notice').className = 'alert ' + (failed ? 'alert-danger' : 'alert-info');
@@ -17,23 +18,26 @@
     catch (error) { notice(error.message || 'The request failed.', true); }
     finally { button.disabled = false; }
   };
-  async function updateControls(key, enabled) {
+  function editConfig(edit) {
+    pendingEdits++;
+    ui.disableSaveButton();
     queue = queue.catch(() => {}).then(async () => {
       const blocks = await ui.getPluginConfig();
       const current = blocks.find(item => item.platform === 'KeurigSmart') || config;
-      const selected = Object.fromEntries(catalog.map(control => [control.subtype, legacyEnabled(control)]));
-      current.controls = { ...(current.controls || config.controls || selected), [key]: enabled };
-      config = current;
-      await ui.updatePluginConfig(blocks.length ? blocks.map(item => item.platform === 'KeurigSmart' ? current : item) : [current]);
+      const next = { ...current, ...edit(current) };
+      await ui.updatePluginConfig(blocks.includes(current) ? blocks.map(item => item === current ? next : item) : [...blocks, next]);
+      config = next;
+    }).finally(() => {
+      if (--pendingEdits === 0) ui.enableSaveButton();
     });
     return queue;
   }
-  function legacyEnabled(control) {
+  function legacyEnabled(control, settings = config) {
     if (control.mode === 'power') return true;
-    if (!config.enableBrew || control.newControl) return false;
-    if (control.mode === 'water') return !!config.enableHotWater;
-    if (control.mode === 'recommended') return !!config.enableRecommended;
-    if (control.mode === 'favorite') return config.enableFavorites !== false;
+    if (!settings.enableBrew || control.newControl) return false;
+    if (control.mode === 'water') return !!settings.enableHotWater;
+    if (control.mode === 'recommended') return !!settings.enableRecommended;
+    if (control.mode === 'favorite') return settings.enableFavorites !== false;
     return true;
   }
   function renderControls() {
@@ -52,7 +56,20 @@
       checkbox.type = 'checkbox'; checkbox.className = 'form-check-input'; checkbox.id = 'control-' + index;
       checkbox.checked = config.controls ? config.controls[control.subtype] === true : legacyEnabled(control);
       checkbox.disabled = !canEditControls;
-      checkbox.addEventListener('change', () => perform(checkbox, () => updateControls(control.subtype, checkbox.checked)));
+      checkbox.addEventListener('change', () => {
+        const enabled = checkbox.checked;
+        return perform(checkbox, async () => {
+          try {
+            await editConfig(current => {
+              const selected = current.controls || Object.fromEntries(catalog.map(item => [item.subtype, legacyEnabled(item, current)]));
+              return { controls: { ...selected, [control.subtype]: enabled } };
+            });
+          } catch (error) {
+            checkbox.checked = config.controls ? config.controls[control.subtype] === true : legacyEnabled(control);
+            throw error;
+          }
+        });
+      });
       const label = document.createElement('label'); label.className = 'form-check-label';
       label.htmlFor = checkbox.id; label.textContent = control.name;
       row.append(checkbox, label); groups.get(control.group).append(row);
@@ -94,7 +111,22 @@
       config = { platform: 'KeurigSmart', name: 'Keurig', controls: { power: true } };
       await ui.updatePluginConfig([...blocks, config]);
     }
-    ui.showSchemaForm();
+    // The generated schema form can replace config fields absent from its layout.
+    const { schema } = await ui.getPluginConfigSchema();
+    for (const key of ['name', 'brewTemperature', 'brewStrength']) {
+      const input = $(key);
+      const field = schema.properties[key];
+      for (const value of field.enum || []) input.add(new Option(value, value));
+      input.value = config[key] || field.default;
+      input.addEventListener('change', () => {
+        const value = input.value.trim() || field.default;
+        input.value = value;
+        editConfig(() => ({ [key]: value })).catch(error => {
+          input.value = config[key] || field.default;
+          notice(error.message || 'The setting could not be updated.', true);
+        });
+      });
+    }
     const status = await ui.request('/status');
     if (status.signedIn && !status.needsRefresh) await discover();
     else notice(status.signedIn ? 'Sign-in saved. Start the Keurig bridge to refresh the session, then check the connection.'

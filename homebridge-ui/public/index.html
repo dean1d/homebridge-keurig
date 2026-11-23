@@ -33,6 +33,15 @@
       <div id="controls"></div>
     </div>
   </div>
+  <fieldset class="mb-3">
+    <legend class="h5">Brewer settings</legend>
+    <label for="name" class="form-label">Plugin name</label>
+    <input id="name" class="form-control mb-2" type="text">
+    <label for="brewTemperature" class="form-label">Coffee and hot water temperature</label>
+    <select id="brewTemperature" class="form-select mb-2"></select>
+    <label for="brewStrength" class="form-label">Coffee strength</label>
+    <select id="brewStrength" class="form-select"></select>
+  </fieldset>
   <p class="small text-muted">For Matter, enable a Keurig child bridge and turn on Matter in that child bridge's settings. Pair it using the Homebridge Matter QR code. Save these settings and restart the child bridge after changing controls.</p>
 </div>
 <script src="settings.js"></script>

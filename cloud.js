@@ -191,7 +191,7 @@ class KeurigCloud {
     if (!profile.customerID) throw new Error('The Keurig profile has no customer ID.');
     const list = await this.request('api/alcm/v1/devices?customerId=' + encodeURIComponent(profile.customerID));
     if (!Array.isArray(list.devices) || list.devices.some(d => !d?.id)) throw new Error('Unexpected Keurig device list.');
-    this.models = new Map(list.devices.map(device => [device.id, device.model]));
+    this.models = new Map(list.devices.map(device => [device.id, device.model || this.models.get(device.id)]));
     return list.devices;
   }
 

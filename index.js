@@ -33,7 +33,10 @@ class KeurigPlatform {
       accessory.context.model ||= accessory.getService(this.api.hap.Service.AccessoryInformation)
         ?.getCharacteristic(this.api.hap.Characteristic.Model).value;
       this.deviceAccessories.set(accessory.context.deviceId, accessory);
-      if (accessory.context.model) this.bind(accessory, accessory.context.deviceId);
+      if (accessory.context.model) {
+        this.cloud.models.set(accessory.context.deviceId, accessory.context.model);
+        this.bind(accessory, accessory.context.deviceId);
+      }
     }
   }
 
@@ -211,17 +214,19 @@ class KeurigPlatform {
         if ((restored?.nextBrew || 0) > (accessory.context.nextBrew || 0)) {
           accessory.context = { ...accessory.context, ...restored, deviceId: device.id };
         }
-        accessory.context.model = device.model;
+        const model = device.model || accessory.context.model;
+        accessory.context.model = model;
+        if (model) this.cloud.models.set(device.id, model);
         if (favorites) accessory.context.favorites = favorites.filter(favorite =>
-          !favorite.deviceModel || favorite.deviceModel === device.model);
+          !favorite.deviceModel || favorite.deviceModel === model);
         accessory.context.favorites ||= [];
-        const controls = enabledControls(this.config, device.model, accessory.context.favorites);
+        const controls = enabledControls(this.config, model, accessory.context.favorites);
         const publishHap = this.api.isHapEnabled?.() !== false && !this.api.isHapExternalsOnly?.() && controls.length > 0;
         if (publishHap) {
           const { Service, Characteristic } = this.api.hap;
           accessory.getService(Service.AccessoryInformation)
             .setCharacteristic(Characteristic.Manufacturer, 'Keurig')
-            .setCharacteristic(Characteristic.Model, String(device.model || 'SMART'))
+            .setCharacteristic(Characteristic.Model, String(model || 'SMART'))
             .setCharacteristic(Characteristic.SerialNumber, String(device.serialNumber || device.id));
           this.bind(accessory, device.id);
           if (!this.accessories.has(uuid)) {
@@ -233,7 +238,7 @@ class KeurigPlatform {
           this.api.unregisterPlatformAccessories(plugin, platform, [accessory]);
           this.accessories.delete(uuid);
         }
-        const record = { device, accessory, controls };
+        const record = { device: { ...device, model }, accessory, controls };
         try {
           const previousPower = this.powerStates.get(device.id);
           const { on } = await this.cloud.state(device.id);

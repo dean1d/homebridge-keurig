@@ -84,6 +84,44 @@ test('same-tap writes share one in-flight brew and acknowledge accepted repeats 
   assert.equal(messages.filter(message => message.includes('request accepted')).length, 1);
 });
 
+test('restart with a partial discovery response keeps selected HomeKit and Matter controls', async t => {
+  const { platform, accessory } = setup();
+  platform.config.controls = { power: true, 'shot-2': true };
+  const services = new Map();
+  const info = { setCharacteristic() { return this; } };
+  Object.assign(accessory, {
+    UUID: 'cafe', context: { deviceId: 'cafe', model: 'K27' },
+    getService: () => info,
+    getServiceById: (_type, subtype) => services.get(subtype),
+    addService(_type, _name, subtype) {
+      const on = { onGet() { return this; }, onSet() {} };
+      const service = { UUID: 'switch', subtype, getCharacteristic: () => on, updateCharacteristic() {} };
+      services.set(subtype, service);
+      return service;
+    },
+    removeService: service => services.delete(service.subtype),
+  });
+  Object.defineProperty(accessory, 'services', { get: () => [...services.values()] });
+  Object.assign(platform.api.hap, {
+    Service: { Switch: { UUID: 'switch' }, AccessoryInformation: 'info' },
+    Characteristic: { On: 'on' }, uuid: { generate: () => 'cafe' },
+  });
+  platform.nameService = () => {};
+  platform.configureAccessory(accessory);
+  platform.cloud.request = async route => route.endsWith('/profile')
+    ? { customerID: 'customer' } : { devices: [{ id: 'cafe' }] };
+  platform.cloud.state = async () => ({ on: true });
+  platform.matter.sync = async ([record]) => {
+    assert.equal(record.device.model, 'K27');
+    assert.deepEqual(record.controls.map(control => control.subtype), ['power', 'shot-2']);
+  };
+  t.after(() => clearTimeout(platform.timer));
+  await platform.poll();
+  assert.equal(accessory.context.model, 'K27');
+  assert.equal(platform.cloud.models.get('cafe'), 'K27');
+  assert.deepEqual([...services.keys()], ['power', 'shot-2']);
+});
+
 test('another preset remains blocked, and deliberate later taps still report the cooldown once', async t => {
   t.mock.timers.enable({ apis: ['Date'], now: 100000 });
   const { platform, accessory, preset, warnings } = setup();

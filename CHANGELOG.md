@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.3
+
+- Preserve control selections when saving settings and retain cached controls when discovery omits the brewer model.
+- Declare Node.js 22, 24, and 26 LTS support and test on Node.js 26.13.1.
+
 ## 0.3.2
 
 - Serve Power reads from the last known state. Successful commands update it immediately, and a failed poll preserves it.

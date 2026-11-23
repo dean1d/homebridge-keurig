@@ -12,7 +12,8 @@ Control a Keurig SMART brewer from HomeKit and Matter. Connect your Keurig accou
 
 ## Requirements
 
-- Node.js 22.12 or later and Homebridge 1.8 or later
+- Node.js 22.12+ on the 22.x line, 24.x, or 26.x, and Homebridge 1.8 or later
+- Homebridge 2.5 or later when using Node.js 26 (tested with v26.13.1)
 - Homebridge 2.5 or later for Matter
 - A Keurig account with a Wi-Fi brewer already registered in the Keurig app
 
@@ -84,6 +85,7 @@ This example exposes Power, 8 oz coffee, and 6 oz hot water. The legacy key **br
 - **Hot water still reports an unknown pod.** Remove the pod, close the handle, and wait for the brewer to report ready. If the plugin still cannot confirm an empty holder, it blocks dispensing. Start with 6 oz on K27.
 - **The log shows PM_NOT_CYCLED.** Open the handle, prepare or replace the pod, and close the handle. Wait 10 seconds from the first failure before trying the same preset again.
 - **Did it send a brew?** Look for **Sending … command**, followed by **request accepted** and **brewer confirmed brewing**. A failed readiness check can wake the brewer, but sends no brew command.
+- **Only Power is visible.** Open **Plugins → Keurig Settings**, choose **Check connection & refresh favorites**, select the missing controls, and click Homebridge's **Save** before restarting the bridge.
 - **Favorites are missing.** Save the favorite in the Keurig app, choose **Check connection & refresh favorites**, then select it and save.
 - **Terminal sign-in.** Run the installed helper as the Homebridge service user with the directory containing Homebridge's config.json. This is typically /var/lib/homebridge on Linux or /homebridge in Docker.
 
